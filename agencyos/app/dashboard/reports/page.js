@@ -1,73 +1,65 @@
 'use client';
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
-import { fmtDuration, fmtCurrency, parseUTC } from '@/lib/utils';
-import { Download, TrendingUp, Euro, Clock, ChevronDown } from 'lucide-react';
+import { fmtDuration, fmtCurrency, fmtDate, parseUTC } from '@/lib/utils';
+import { Download, Settings2, TrendingUp, Euro, Clock, ChevronDown, Check } from 'lucide-react';
 
 const MONTHS = ['Ian','Feb','Mar','Apr','Mai','Iun','Iul','Aug','Sep','Oct','Nov','Dec'];
 
+// All available columns
+const ALL_COLUMNS = [
+  { key: 'client',        label: 'Client',           default: true },
+  { key: 'project',       label: 'Proiect',          default: true },
+  { key: 'hours',         label: 'Ore lucrate',      default: true },
+  { key: 'billed',        label: 'Facturat (€)',     default: true },
+  { key: 'cph',           label: '€/oră',            default: true },
+  { key: 'entries',       label: 'Nr. înregistrări', default: false },
+  { key: 'billing_day',   label: 'Zi facturare',     default: false },
+  { key: 'monthly_amt',   label: 'Sumă lunară',      default: false },
+  { key: 'last_activity', label: 'Ultima activitate',default: false },
+  { key: 'margin',        label: 'Marjă profit',     default: false },
+];
+
+const RANGES = [
+  { key: '3months',  label: '3 luni' },
+  { key: '6months',  label: '6 luni' },
+  { key: '12months', label: '12 luni' },
+  { key: 'custom',   label: 'Custom' },
+];
+
 function LineChart({ data, color = '#007AFF' }) {
-  if (!data || data.length < 2) return (
-    <div className="flex items-center justify-center h-32 text-ios-tertiary text-footnote">
-      Date insuficiente — adaugă facturi la proiecte
+  if (!data || data.filter(d => d.value > 0).length < 2) return (
+    <div className="flex items-center justify-center h-24 text-ios-tertiary text-footnote">
+      Date insuficiente pentru grafic
     </div>
   );
   const values = data.map(d => d.value);
-  const min = Math.min(...values);
-  const max = Math.max(...values);
+  const max = Math.max(...values, 1);
+  const min = Math.min(...values.filter(v => v > 0), 0);
   const range = max - min || 1;
-  const W = 400, H = 100, PAD = 24;
-  const points = data.map((d, i) => ({
+  const W = 400, H = 90, PAD = 20;
+  const pts = data.map((d, i) => ({
     x: PAD + (i / (data.length - 1)) * (W - PAD * 2),
-    y: PAD + ((max - d.value) / range) * (H - PAD * 2),
+    y: d.value > 0 ? PAD + ((max - d.value) / range) * (H - PAD * 2) : H,
     ...d,
   }));
-  const pathD = points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ');
-  const areaD = `${pathD} L ${points[points.length-1].x} ${H} L ${points[0].x} ${H} Z`;
+  const pathD = pts.filter(p => p.value > 0).map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ');
   return (
     <div className="w-full overflow-x-auto">
-      <svg viewBox={`0 0 ${W} ${H + 24}`} className="w-full" style={{ minWidth: 260 }}>
-        {[0, 0.5, 1].map(t => (
-          <line key={t} x1={PAD} x2={W-PAD} y1={PAD + t*(H-PAD*2)} y2={PAD + t*(H-PAD*2)} stroke="#F2F2F7" strokeWidth="1" />
-        ))}
-        <path d={areaD} fill={color} fillOpacity="0.1" />
+      <svg viewBox={`0 0 ${W} ${H + 20}`} className="w-full" style={{ minWidth: 240 }}>
+        {[0, 0.5, 1].map(t => <line key={t} x1={PAD} x2={W-PAD} y1={PAD+t*(H-PAD*2)} y2={PAD+t*(H-PAD*2)} stroke="#F2F2F7" strokeWidth="1" />)}
         <path d={pathD} fill="none" stroke={color} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
-        {points.map((p, i) => (
+        {pts.map((p, i) => p.value > 0 && (
           <g key={i}>
             <circle cx={p.x} cy={p.y} r="4" fill="white" stroke={color} strokeWidth="2" />
-            <text x={p.x} y={p.y - 8} textAnchor="middle" fontSize="9" fill={color} fontWeight="700">
-              {p.displayValue || ''}
-            </text>
-            <text x={p.x} y={H + 18} textAnchor="middle" fontSize="9" fill="#AEAEB2">{p.label}</text>
+            <text x={p.x} y={p.y - 8} textAnchor="middle" fontSize="9" fill={color} fontWeight="700">{p.displayValue}</text>
+            <text x={p.x} y={H + 14} textAnchor="middle" fontSize="9" fill="#AEAEB2">{p.label}</text>
           </g>
         ))}
       </svg>
     </div>
   );
 }
-
-function BarChart({ data, color = '#007AFF' }) {
-  if (!data || data.length === 0) return null;
-  const max = Math.max(...data.map(d => d.value), 1);
-  return (
-    <div className="flex items-end gap-1 h-28 w-full">
-      {data.map((d, i) => (
-        <div key={i} className="flex-1 flex flex-col items-center gap-1">
-          {d.value > 0 && <span className="text-caption2 text-ios-secondary font-medium">{d.topLabel}</span>}
-          <div className="w-full rounded-t-ios-sm" style={{ height: `${Math.max((d.value/max)*80, d.value > 0 ? 4 : 0)}px`, background: color }} />
-          <span className="text-caption2 text-ios-tertiary">{d.label}</span>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-const RANGES = [
-  { key: '3months', label: '3 luni' },
-  { key: '6months', label: '6 luni' },
-  { key: '12months', label: '12 luni' },
-  { key: 'custom',  label: 'Custom' },
-];
 
 export default function ReportsPage() {
   const [projects, setProjects] = useState([]);
@@ -80,16 +72,18 @@ export default function ReportsPage() {
   const [customFrom, setCustomFrom] = useState('');
   const [customTo, setCustomTo] = useState('');
   const [entries, setEntries] = useState([]);
-  const [invoices, setInvoices] = useState([]);
+  const [billing, setBilling] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [tab, setTab] = useState('overview');
+  const [tab, setTab] = useState('table');
+  const [showColPicker, setShowColPicker] = useState(false);
+  const [activeCols, setActiveCols] = useState(ALL_COLUMNS.filter(c => c.default).map(c => c.key));
 
   useEffect(() => { loadMeta(); }, []);
   useEffect(() => { if (range !== 'custom') loadData(); }, [range, selProject, selClient, selMember]);
 
   async function loadMeta() {
     const [{ data: proj }, { data: cli }, { data: mem }] = await Promise.all([
-      supabase.from('projects').select('id, name, color, client_id, clients(name)').order('name'),
+      supabase.from('projects').select('id, name, color, client_id, billing_day, monthly_amount, clients(name)').order('name'),
       supabase.from('clients').select('id, name').order('name'),
       supabase.from('profiles').select('id, full_name, email').order('full_name'),
     ]);
@@ -106,88 +100,152 @@ export default function ReportsPage() {
   async function loadData() {
     setLoading(true);
     const { from, to } = getRange();
+
     let q = supabase.from('time_entries')
-      .select('*, profiles(full_name,email), projects(id,name,color,client_id,clients(name))')
-      .not('end_time', 'is', null).gte('created_at', from).lte('created_at', to).order('created_at', { ascending: true });
+      .select('*, profiles(full_name,email), projects(id,name,color,client_id,billing_day,monthly_amount,clients(name))')
+      .not('end_time', 'is', null).gte('created_at', from).lte('created_at', to)
+      .order('created_at', { ascending: true });
     if (selProject) q = q.eq('project_id', selProject);
     if (selMember) q = q.eq('user_id', selMember);
 
-    let iq = supabase.from('invoices').select('*, projects(id,name,color,client_id,clients(name))').order('year').order('month');
-    if (selProject) iq = iq.eq('project_id', selProject);
+    let bq = supabase.from('billing').select('*, clients(name)').order('year').order('month');
+    if (selClient) bq = bq.eq('client_id', selClient);
 
-    const [{ data: ent }, { data: inv }] = await Promise.all([q, iq]);
-    setEntries(ent || []); setInvoices(inv || []);
+    const [{ data: ent }, { data: bil }] = await Promise.all([q, bq]);
+    setEntries(ent || []); setBilling(bil || []);
     setLoading(false);
   }
 
   function getMonths() {
     const { from } = getRange();
-    const start = new Date(from);
     const now = new Date();
     const months = [];
-    let cur = new Date(start.getFullYear(), start.getMonth(), 1);
+    let cur = new Date(new Date(from).getFullYear(), new Date(from).getMonth(), 1);
     while (cur <= now) {
       months.push({ year: cur.getFullYear(), month: cur.getMonth() + 1, label: `${MONTHS[cur.getMonth()]} '${cur.getFullYear().toString().slice(2)}` });
       cur = new Date(cur.getFullYear(), cur.getMonth() + 1, 1);
     }
     return months.map(m => {
       const ent = entries.filter(e => { const d = parseUTC(e.created_at); return d && d.getMonth()+1 === m.month && d.getFullYear() === m.year; });
-      const inv = invoices.filter(i => i.month === m.month && i.year === m.year);
+      const bil = billing.filter(b => b.month === m.month && b.year === m.year && b.status === 'paid');
       const secs = ent.reduce((a, e) => a + (e.duration_seconds || 0), 0);
       const hours = secs / 3600;
-      const invoiced = inv.reduce((a, i) => a + (i.amount || 0), 0);
-      const cph = hours > 0 && invoiced > 0 ? invoiced / hours : 0;
-      return { ...m, secs, hours, invoiced, cph, entryCount: ent.length };
+      const billed = bil.reduce((a, b) => a + (b.amount || 0), 0);
+      const cph = hours > 0 && billed > 0 ? billed / hours : 0;
+      return { ...m, secs, hours, billed, cph, entryCount: ent.length };
     });
   }
 
-  function getProjectSummary() {
+  // Build per-project table data
+  function getTableData() {
     const map = {};
+
     entries.forEach(e => {
       const pid = e.project_id; if (!pid) return;
-      if (!map[pid]) map[pid] = { name: e.projects?.name||'—', color: e.projects?.color||'#007AFF', client: e.projects?.clients?.name||'—', secs: 0, invoiced: 0 };
+      if (!map[pid]) map[pid] = {
+        id: pid,
+        project: e.projects?.name || '—',
+        client: e.projects?.clients?.name || '—',
+        client_id: e.projects?.client_id,
+        color: e.projects?.color || '#007AFF',
+        billing_day: e.projects?.billing_day,
+        monthly_amt: e.projects?.monthly_amount,
+        secs: 0, entries: 0, lastActivity: null,
+      };
       map[pid].secs += (e.duration_seconds || 0);
+      map[pid].entries++;
+      if (!map[pid].lastActivity || e.created_at > map[pid].lastActivity) map[pid].lastActivity = e.created_at;
     });
-    invoices.forEach(i => {
-      const pid = i.project_id;
-      if (!map[pid]) map[pid] = { name: i.projects?.name||'—', color: i.projects?.color||'#007AFF', client: i.projects?.clients?.name||'—', secs: 0, invoiced: 0 };
-      map[pid].invoiced += (i.amount || 0);
+
+    // Add billing data per client
+    billing.forEach(b => {
+      Object.values(map).forEach(p => {
+        if (p.client_id === b.client_id) {
+          p.billed = (p.billed || 0) + (b.status === 'paid' ? (b.amount || 0) : 0);
+          p.billed_total = (p.billed_total || 0) + (b.amount || 0);
+        }
+      });
     });
-    return Object.entries(map).map(([id, d]) => ({
-      id, ...d, hours: d.secs / 3600,
-      cph: d.invoiced > 0 && d.secs > 0 ? d.invoiced / (d.secs / 3600) : null,
-    })).sort((a, b) => (b.cph||0) - (a.cph||0));
+
+    return Object.values(map).map(p => ({
+      ...p,
+      hours: p.secs / 3600,
+      cph: p.billed && p.secs > 0 ? p.billed / (p.secs / 3600) : null,
+      margin: p.monthly_amt && p.billed && p.secs > 0
+        ? Math.round(((p.billed - (p.secs / 3600) * 25) / p.billed) * 100)
+        : null,
+    })).sort((a, b) => b.hours - a.hours);
   }
 
   const monthlyData = getMonths();
-  const projectSummary = getProjectSummary();
+  const tableData = getTableData();
   const totalSecs = entries.reduce((a, e) => a + (e.duration_seconds || 0), 0);
-  const totalInvoiced = invoices.reduce((a, i) => a + (i.amount || 0), 0);
-  const avgCph = totalSecs > 0 && totalInvoiced > 0 ? totalInvoiced / (totalSecs / 3600) : 0;
+  const totalBilled = billing.filter(b => b.status === 'paid').reduce((a, b) => a + (b.amount || 0), 0);
+  const avgCph = totalSecs > 0 && totalBilled > 0 ? totalBilled / (totalSecs / 3600) : 0;
+
+  function toggleCol(key) {
+    setActiveCols(prev => prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key]);
+  }
 
   function exportExcel() {
     import('xlsx').then(XLSX => {
-      const rows = monthlyData.map(m => ({
-        'Lună': m.label, 'Ore': m.hours.toFixed(2),
-        'Facturat (€)': m.invoiced, '€/oră': m.cph ? m.cph.toFixed(2) : '',
-      }));
+      const rows = tableData.map(p => {
+        const row = {};
+        if (activeCols.includes('client')) row['Client'] = p.client;
+        if (activeCols.includes('project')) row['Proiect'] = p.project;
+        if (activeCols.includes('hours')) row['Ore lucrate'] = p.hours.toFixed(2);
+        if (activeCols.includes('billed')) row['Facturat (€)'] = p.billed || 0;
+        if (activeCols.includes('cph')) row['€/oră'] = p.cph ? p.cph.toFixed(2) : '—';
+        if (activeCols.includes('entries')) row['Nr. înregistrări'] = p.entries;
+        if (activeCols.includes('billing_day')) row['Zi facturare'] = p.billing_day ? `Ziua ${p.billing_day}` : '—';
+        if (activeCols.includes('monthly_amt')) row['Sumă lunară'] = p.monthly_amt || '—';
+        if (activeCols.includes('last_activity')) row['Ultima activitate'] = p.lastActivity ? fmtDate(p.lastActivity) : '—';
+        return row;
+      });
       const ws = XLSX.utils.json_to_sheet(rows);
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, 'Raport');
+
+      // Add monthly sheet
+      const monthRows = monthlyData.map(m => ({ 'Lună': m.label, 'Ore': m.hours.toFixed(2), 'Facturat (€)': m.billed, '€/oră': m.cph ? m.cph.toFixed(2) : '' }));
+      const ws2 = XLSX.utils.json_to_sheet(monthRows);
+      XLSX.utils.book_append_sheet(wb, ws2, 'Lunar');
       XLSX.writeFile(wb, `agencyos_raport.xlsx`);
     });
   }
+
+  const colMap = Object.fromEntries(ALL_COLUMNS.map(c => [c.key, c.label]));
 
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-title2 font-bold text-ios-primary">Rapoarte</h1>
-          <p className="text-subhead text-ios-secondary">Profitabilitate & evoluție</p>
+          <p className="text-subhead text-ios-secondary">Analiză avansată</p>
         </div>
-        <button onClick={exportExcel} className="btn-secondary flex items-center gap-2">
-          <Download className="w-4 h-4" /> Excel
-        </button>
+        <div className="flex gap-2">
+          <div className="relative">
+            <button onClick={() => setShowColPicker(!showColPicker)}
+              className="btn-secondary flex items-center gap-2">
+              <Settings2 className="w-4 h-4" /> Coloane
+            </button>
+            {showColPicker && (
+              <div className="absolute right-0 top-full mt-2 bg-white rounded-ios-lg shadow-ios-modal border border-ios-separator/30 p-3 z-50 w-56">
+                <p className="text-footnote font-semibold text-ios-secondary mb-2 uppercase tracking-wide">Coloane vizibile</p>
+                {ALL_COLUMNS.map(col => (
+                  <button key={col.key} onClick={() => toggleCol(col.key)}
+                    className="flex items-center justify-between w-full px-2 py-2 rounded-ios hover:bg-ios-fill text-left transition-colors">
+                    <span className="text-subhead text-ios-primary">{col.label}</span>
+                    {activeCols.includes(col.key) && <Check className="w-4 h-4 text-ios-blue" strokeWidth={2.5} />}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+          <button onClick={exportExcel} className="btn-secondary flex items-center gap-2">
+            <Download className="w-4 h-4" /> Excel
+          </button>
+        </div>
       </div>
 
       {/* Filters */}
@@ -209,14 +267,14 @@ export default function ReportsPage() {
         )}
         <div className="flex gap-2 flex-wrap">
           {[
-            { val: selClient, set: v => { setSelClient(v); setSelProject(''); }, opts: clients, placeholder: 'Toți clienții' },
-            { val: selProject, set: setSelProject, opts: projects.filter(p => !selClient || p.client_id === selClient), placeholder: 'Toate proiectele' },
+            { val: selClient, set: v => { setSelClient(v); setSelProject(''); }, opts: clients.map(c => ({ id: c.id, name: c.name })), placeholder: 'Toți clienții' },
+            { val: selProject, set: setSelProject, opts: projects.filter(p => !selClient || p.client_id === selClient).map(p => ({ id: p.id, name: p.name })), placeholder: 'Toate proiectele' },
             { val: selMember, set: setSelMember, opts: members.map(m => ({ id: m.id, name: m.full_name || m.email })), placeholder: 'Toată echipa' },
           ].map(({ val, set, opts, placeholder }, i) => (
             <div key={i} className="relative">
               <select className="input appearance-none pr-8 py-2 text-footnote w-44" value={val} onChange={e => set(e.target.value)}>
                 <option value="">{placeholder}</option>
-                {opts.map(o => <option key={o.id} value={o.id}>{o.name || o.full_name}</option>)}
+                {opts.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
               </select>
               <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-ios-tertiary pointer-events-none" />
             </div>
@@ -234,9 +292,9 @@ export default function ReportsPage() {
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
             {[
               { label: 'Total ore', value: fmtDuration(totalSecs), icon: Clock, color: 'text-ios-blue bg-blue-50' },
-              { label: 'Total facturat', value: totalInvoiced > 0 ? fmtCurrency(totalInvoiced) : '—', icon: Euro, color: 'text-ios-green bg-green-50' },
+              { label: 'Încasat', value: totalBilled > 0 ? fmtCurrency(totalBilled) : '—', icon: Euro, color: 'text-ios-green bg-green-50' },
               { label: '€/oră mediu', value: avgCph > 0 ? `€${avgCph.toFixed(0)}/h` : '—', icon: TrendingUp, color: 'text-ios-orange bg-orange-50' },
-              { label: 'Proiecte active', value: projectSummary.length, icon: TrendingUp, color: 'text-ios-purple bg-purple-50' },
+              { label: 'Proiecte', value: tableData.length, icon: TrendingUp, color: 'text-ios-purple bg-purple-50' },
             ].map(({ label, value, icon: Icon, color }) => (
               <div key={label} className="card p-4">
                 <div className={`w-9 h-9 rounded-ios flex items-center justify-center mb-3 ${color}`}><Icon className="w-4 h-4" /></div>
@@ -248,66 +306,120 @@ export default function ReportsPage() {
 
           {/* Tabs */}
           <div className="flex gap-0.5 bg-ios-fill p-1 rounded-ios">
-            {[['overview','Rezumat'],['evolution','Evoluție'],['details','Detalii']].map(([k,v]) => (
+            {[['table','Tabel proiecte'],['evolution','Evoluție'],['monthly','Lunar']].map(([k,v]) => (
               <button key={k} onClick={() => setTab(k)}
                 className={`flex-1 py-2 rounded-ios-sm text-footnote font-semibold transition-all ${tab === k ? 'bg-white text-ios-primary shadow-ios-sm' : 'text-ios-secondary'}`}>{v}</button>
             ))}
           </div>
 
-          {tab === 'overview' && (
-            <div className="space-y-4">
-              <div className="card p-4">
-                <p className="text-headline font-semibold mb-4">€/oră per proiect</p>
-                {projectSummary.length === 0 ? (
-                  <p className="text-center text-ios-tertiary text-subhead py-6">Nicio dată în perioada selectată</p>
-                ) : projectSummary.map(p => (
-                  <div key={p.id} className="flex items-center justify-between py-3 border-b border-ios-separator/30 last:border-0">
-                    <div className="flex items-center gap-2.5">
-                      <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: p.color }} />
-                      <div>
-                        <p className="text-subhead font-semibold text-ios-primary">{p.name}</p>
-                        <p className="text-caption1 text-ios-secondary">{p.client} · {p.hours.toFixed(1)}h</p>
-                      </div>
-                    </div>
-                    <div className="text-right">
-                      {p.cph ? <p className="text-subhead font-bold text-ios-green">€{p.cph.toFixed(0)}/h</p> : <p className="text-footnote text-ios-tertiary">Fără factură</p>}
-                      {p.invoiced > 0 && <p className="text-caption1 text-ios-secondary">{fmtCurrency(p.invoiced)}</p>}
-                    </div>
-                  </div>
-                ))}
-              </div>
-
-              <div className="card p-4">
-                <p className="text-headline font-semibold mb-4">Ore lucrate pe luni</p>
-                <BarChart data={monthlyData.map(m => ({ label: m.label.split(' ')[0], value: m.hours, topLabel: m.hours > 0 ? `${m.hours.toFixed(0)}h` : '' }))} color="#007AFF" />
+          {/* Table view */}
+          {tab === 'table' && (
+            <div className="card overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left">
+                  <thead className="bg-ios-bg border-b border-ios-separator/30">
+                    <tr>
+                      {activeCols.map(key => (
+                        <th key={key} className="px-4 py-3 text-caption1 font-semibold text-ios-secondary uppercase tracking-wide whitespace-nowrap">
+                          {colMap[key]}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {tableData.length === 0 ? (
+                      <tr><td colSpan={activeCols.length} className="px-4 py-8 text-center text-ios-tertiary text-subhead">Nicio dată în perioada selectată</td></tr>
+                    ) : tableData.map(p => (
+                      <tr key={p.id} className="border-t border-ios-separator/20 hover:bg-ios-bg">
+                        {activeCols.includes('client') && (
+                          <td className="px-4 py-3 text-subhead font-medium text-ios-primary">{p.client}</td>
+                        )}
+                        {activeCols.includes('project') && (
+                          <td className="px-4 py-3">
+                            <div className="flex items-center gap-2">
+                              <div className="w-2 h-2 rounded-full shrink-0" style={{ background: p.color }} />
+                              <span className="text-subhead font-semibold text-ios-primary">{p.project}</span>
+                            </div>
+                          </td>
+                        )}
+                        {activeCols.includes('hours') && (
+                          <td className="px-4 py-3 text-subhead text-ios-primary font-semibold">{p.hours.toFixed(1)}h</td>
+                        )}
+                        {activeCols.includes('billed') && (
+                          <td className="px-4 py-3 text-subhead font-bold text-ios-green">
+                            {p.billed ? fmtCurrency(p.billed) : <span className="text-ios-tertiary font-normal">—</span>}
+                          </td>
+                        )}
+                        {activeCols.includes('cph') && (
+                          <td className="px-4 py-3">
+                            {p.cph ? (
+                              <span className={`badge ${p.cph >= 100 ? 'badge-green' : p.cph >= 50 ? 'badge-orange' : 'badge-red'}`}>
+                                €{p.cph.toFixed(0)}/h
+                              </span>
+                            ) : <span className="text-ios-tertiary text-footnote">—</span>}
+                          </td>
+                        )}
+                        {activeCols.includes('entries') && (
+                          <td className="px-4 py-3 text-footnote text-ios-secondary">{p.entries}</td>
+                        )}
+                        {activeCols.includes('billing_day') && (
+                          <td className="px-4 py-3 text-footnote text-ios-secondary">
+                            {p.billing_day ? `Ziua ${p.billing_day}` : <span className="text-ios-tertiary">—</span>}
+                          </td>
+                        )}
+                        {activeCols.includes('monthly_amt') && (
+                          <td className="px-4 py-3 text-footnote text-ios-secondary">
+                            {p.monthly_amt ? fmtCurrency(p.monthly_amt) : <span className="text-ios-tertiary">—</span>}
+                          </td>
+                        )}
+                        {activeCols.includes('last_activity') && (
+                          <td className="px-4 py-3 text-footnote text-ios-secondary">
+                            {p.lastActivity ? fmtDate(p.lastActivity) : '—'}
+                          </td>
+                        )}
+                        {activeCols.includes('margin') && (
+                          <td className="px-4 py-3">
+                            {p.margin !== null ? (
+                              <span className={`badge ${p.margin >= 50 ? 'badge-green' : p.margin >= 20 ? 'badge-orange' : 'badge-red'}`}>
+                                {p.margin}%
+                              </span>
+                            ) : <span className="text-ios-tertiary text-footnote">—</span>}
+                          </td>
+                        )}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             </div>
           )}
 
+          {/* Evolution charts */}
           {tab === 'evolution' && (
             <div className="space-y-4">
               <div className="card p-4">
                 <p className="text-headline font-semibold mb-1">Evoluție €/oră</p>
-                <p className="text-footnote text-ios-secondary mb-4">Valoarea unei ore de lucru în fiecare lună</p>
+                <p className="text-footnote text-ios-secondary mb-4">Valoarea unei ore de lucru per lună</p>
                 <LineChart color="#34C759"
-                  data={monthlyData.filter(m => m.cph > 0).map(m => ({ label: m.label.split(' ')[0], value: parseFloat(m.cph.toFixed(1)), displayValue: `€${m.cph.toFixed(0)}` }))} />
+                  data={monthlyData.map(m => ({ label: m.label.split(' ')[0], value: parseFloat(m.cph.toFixed(1)), displayValue: m.cph > 0 ? `€${m.cph.toFixed(0)}` : '' }))} />
               </div>
               <div className="card p-4">
-                <p className="text-headline font-semibold mb-1">Evoluție facturat (€)</p>
-                <p className="text-footnote text-ios-secondary mb-4">Total facturi per lună</p>
+                <p className="text-headline font-semibold mb-1">Evoluție încasat (€)</p>
+                <p className="text-footnote text-ios-secondary mb-4">Facturi plătite per lună</p>
                 <LineChart color="#FF9500"
-                  data={monthlyData.filter(m => m.invoiced > 0).map(m => ({ label: m.label.split(' ')[0], value: m.invoiced, displayValue: `€${m.invoiced}` }))} />
+                  data={monthlyData.map(m => ({ label: m.label.split(' ')[0], value: m.billed, displayValue: m.billed > 0 ? `€${m.billed}` : '' }))} />
               </div>
               <div className="card p-4">
                 <p className="text-headline font-semibold mb-1">Evoluție ore lucrate</p>
                 <p className="text-footnote text-ios-secondary mb-4">Total ore per lună</p>
                 <LineChart color="#007AFF"
-                  data={monthlyData.filter(m => m.hours > 0).map(m => ({ label: m.label.split(' ')[0], value: parseFloat(m.hours.toFixed(1)), displayValue: `${m.hours.toFixed(0)}h` }))} />
+                  data={monthlyData.map(m => ({ label: m.label.split(' ')[0], value: parseFloat(m.hours.toFixed(1)), displayValue: m.hours > 0 ? `${m.hours.toFixed(0)}h` : '' }))} />
               </div>
             </div>
           )}
 
-          {tab === 'details' && (
+          {/* Monthly detail */}
+          {tab === 'monthly' && (
             <div className="card overflow-hidden">
               <div className="px-4 py-3 border-b border-ios-separator/50">
                 <p className="text-headline font-semibold">Detalii lunare</p>
@@ -316,17 +428,17 @@ export default function ReportsPage() {
                 <table className="w-full text-left">
                   <thead className="bg-ios-bg">
                     <tr>
-                      {['Lună','Ore lucrate','Facturat','€/oră','Înregistrări'].map(h => (
+                      {['Lună','Ore lucrate','Încasat (€)','€/oră','Înregistrări'].map(h => (
                         <th key={h} className="px-4 py-3 text-caption1 font-semibold text-ios-secondary uppercase tracking-wide whitespace-nowrap">{h}</th>
                       ))}
                     </tr>
                   </thead>
                   <tbody>
                     {monthlyData.map((m, i) => (
-                      <tr key={i} className="border-t border-ios-separator/30 hover:bg-ios-bg">
-                        <td className="px-4 py-3 text-subhead font-semibold">{m.label}</td>
+                      <tr key={i} className="border-t border-ios-separator/20 hover:bg-ios-bg">
+                        <td className="px-4 py-3 text-subhead font-bold">{m.label}</td>
                         <td className="px-4 py-3 text-subhead">{m.hours > 0 ? `${m.hours.toFixed(1)}h` : <span className="text-ios-tertiary">—</span>}</td>
-                        <td className="px-4 py-3 text-subhead font-semibold text-ios-green">{m.invoiced > 0 ? fmtCurrency(m.invoiced) : <span className="text-ios-tertiary font-normal">—</span>}</td>
+                        <td className="px-4 py-3 text-subhead font-bold text-ios-green">{m.billed > 0 ? fmtCurrency(m.billed) : <span className="text-ios-tertiary font-normal">—</span>}</td>
                         <td className="px-4 py-3">{m.cph > 0 ? <span className="badge badge-green">€{m.cph.toFixed(0)}/h</span> : <span className="text-ios-tertiary text-footnote">—</span>}</td>
                         <td className="px-4 py-3 text-footnote text-ios-secondary">{m.entryCount}</td>
                       </tr>
