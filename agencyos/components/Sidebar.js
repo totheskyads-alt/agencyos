@@ -4,7 +4,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import {
   LayoutDashboard, Timer, Users, FolderOpen,
-  CheckSquare, BarChart3, UsersRound, LogOut, Menu, X, Clock
+  CheckSquare, BarChart3, UsersRound, LogOut, Menu, X, Clock, Receipt
 } from 'lucide-react';
 import { useState } from 'react';
 import { ROLES } from '@/lib/utils';
@@ -15,6 +15,7 @@ const nav = [
   { href: '/dashboard/clients',  icon: Users,           label: 'Clienți' },
   { href: '/dashboard/projects', icon: FolderOpen,      label: 'Proiecte' },
   { href: '/dashboard/tasks',    icon: CheckSquare,     label: 'Taskuri' },
+  { href: '/dashboard/billing',  icon: Receipt,         label: 'Facturare' },
   { href: '/dashboard/reports',  icon: BarChart3,       label: 'Rapoarte' },
   { href: '/dashboard/team',     icon: UsersRound,      label: 'Echipă' },
 ];
