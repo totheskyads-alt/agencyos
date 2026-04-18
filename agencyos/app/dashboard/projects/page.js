@@ -3,11 +3,14 @@ import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import Modal from '@/components/Modal';
 import { fmtDuration, fmtCurrency } from '@/lib/utils';
-import { Plus, Search, ChevronRight, Euro, Trash2 } from 'lucide-react';
+import { Plus, Search, ChevronRight, Euro, Trash2, ChevronDown } from 'lucide-react';
 
 const COLORS = ['#007AFF','#34C759','#FF9500','#FF3B30','#AF52DE','#32ADE6','#5856D6','#FF2D55','#00C7BE'];
-const MONTHS = ['Ianuarie','Februarie','Martie','Aprilie','Mai','Iunie','Iulie','August','Septembrie','Octombrie','Noiembrie','Decembrie'];
-const empty = { name: '', description: '', client_id: '', status: 'active', color: '#007AFF' };
+const MONTHS_FULL = ['Ianuarie','Februarie','Martie','Aprilie','Mai','Iunie','Iulie','August','Septembrie','Octombrie','Noiembrie','Decembrie'];
+const MONTHS_SHORT = ['Ian','Feb','Mar','Apr','Mai','Iun','Iul','Aug','Sep','Oct','Nov','Dec'];
+const DAYS = Array.from({ length: 28 }, (_, i) => i + 1);
+
+const empty = { name: '', description: '', client_id: '', status: 'active', color: '#007AFF', billing_day: '', monthly_amount: '' };
 
 export default function ProjectsPage() {
   const [projects, setProjects] = useState([]);
@@ -45,7 +48,8 @@ export default function ProjectsPage() {
 
   function openAdd() { setForm(empty); setSelected(null); setModal(true); }
   function openEdit(p) {
-    setForm({ name: p.name, description: p.description || '', client_id: p.client_id || '', status: p.status, color: p.color });
+    setForm({ name: p.name, description: p.description || '', client_id: p.client_id || '',
+      status: p.status, color: p.color, billing_day: p.billing_day || '', monthly_amount: p.monthly_amount || '' });
     setSelected(p); setModal(true);
   }
   async function openInvoices(p) {
@@ -56,7 +60,12 @@ export default function ProjectsPage() {
 
   async function save() {
     setLoading(true);
-    const payload = { ...form, client_id: form.client_id || null };
+    const payload = {
+      ...form,
+      client_id: form.client_id || null,
+      billing_day: form.billing_day ? parseInt(form.billing_day) : null,
+      monthly_amount: form.monthly_amount ? parseFloat(form.monthly_amount) : null,
+    };
     if (selected) await supabase.from('projects').update(payload).eq('id', selected.id);
     else await supabase.from('projects').insert(payload);
     setModal(false); setLoading(false); load();
@@ -78,7 +87,7 @@ export default function ProjectsPage() {
       amount: parseFloat(invForm.amount),
     }, { onConflict: 'project_id,month,year' });
     await loadInvoices(selected.id);
-    setInvForm({ month: new Date().getMonth() + 1, year: new Date().getFullYear(), amount: '' });
+    setInvForm({ ...invForm, amount: '' });
     setLoading(false);
   }
 
@@ -124,7 +133,11 @@ export default function ProjectsPage() {
               <div className="w-3 h-3 rounded-full shrink-0 mr-3" style={{ background: p.color }} />
               <div className="flex-1 min-w-0 cursor-pointer" onClick={() => openEdit(p)}>
                 <p className="text-subhead font-semibold text-ios-primary">{p.name}</p>
-                <p className="text-footnote text-ios-secondary">{p.clients?.name || 'Fără client'}</p>
+                <div className="flex gap-3 mt-0.5">
+                  <p className="text-footnote text-ios-secondary">{p.clients?.name || 'Fără client'}</p>
+                  {p.billing_day && <p className="text-footnote text-ios-tertiary">· Facturare ziua {p.billing_day}</p>}
+                  {p.monthly_amount && <p className="text-footnote text-ios-green font-semibold">· {fmtCurrency(p.monthly_amount)}/lună</p>}
+                </div>
               </div>
               <div className="flex items-center gap-2 shrink-0">
                 {stats[p.id] && <span className="text-footnote text-ios-secondary">{fmtDuration(stats[p.id])}</span>}
@@ -142,18 +155,48 @@ export default function ProjectsPage() {
         </div>
       )}
 
-      {/* Project edit modal */}
+      {/* Project modal */}
       {modal && (
         <Modal title={selected ? 'Editează proiect' : 'Proiect nou'} onClose={() => setModal(false)}>
           <div className="space-y-4">
-            <div><label className="input-label">Nume proiect *</label><input className="input" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} /></div>
-            <div><label className="input-label">Client</label>
-              <select className="input" value={form.client_id} onChange={e => setForm({ ...form, client_id: e.target.value })}>
-                <option value="">— Fără client —</option>
-                {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-              </select>
+            <div><label className="input-label">Nume proiect *</label>
+              <input className="input" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} />
             </div>
-            <div><label className="input-label">Descriere</label><textarea className="input" rows={2} value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} /></div>
+            <div><label className="input-label">Client</label>
+              <div className="relative">
+                <select className="input appearance-none pr-9" value={form.client_id} onChange={e => setForm({ ...form, client_id: e.target.value })}>
+                  <option value="">— Fără client —</option>
+                  {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+                <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-ios-tertiary pointer-events-none" />
+              </div>
+            </div>
+            <div><label className="input-label">Descriere</label>
+              <textarea className="input" rows={2} value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} />
+            </div>
+
+            {/* Billing settings */}
+            <div className="bg-green-50 rounded-ios-lg p-3 space-y-3">
+              <p className="text-footnote font-semibold text-ios-green uppercase tracking-wide">Setări facturare</p>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="input-label">Ziua facturării</label>
+                  <div className="relative">
+                    <select className="input appearance-none pr-9" value={form.billing_day} onChange={e => setForm({ ...form, billing_day: e.target.value })}>
+                      <option value="">— Selectează —</option>
+                      {DAYS.map(d => <option key={d} value={d}>Ziua {d}</option>)}
+                    </select>
+                    <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-ios-tertiary pointer-events-none" />
+                  </div>
+                </div>
+                <div>
+                  <label className="input-label">Sumă lunară (€)</label>
+                  <input className="input" type="number" placeholder="500" value={form.monthly_amount}
+                    onChange={e => setForm({ ...form, monthly_amount: e.target.value })} />
+                </div>
+              </div>
+            </div>
+
             <div>
               <label className="input-label">Culoare</label>
               <div className="flex gap-2 flex-wrap">
@@ -186,46 +229,61 @@ export default function ProjectsPage() {
       {invoiceModal && selected && (
         <Modal title={`Facturi — ${selected.name}`} onClose={() => setInvoiceModal(false)} size="lg">
           <div className="space-y-5">
-            {/* Add invoice form */}
+            {selected.monthly_amount && (
+              <div className="bg-blue-50 rounded-ios p-3">
+                <p className="text-footnote text-ios-blue">
+                  Sumă lunară setată: <span className="font-bold">{fmtCurrency(selected.monthly_amount)}</span>
+                  {selected.billing_day && ` · Facturare ziua ${selected.billing_day}`}
+                </p>
+              </div>
+            )}
             <div className="bg-green-50 rounded-ios-lg p-4">
-              <p className="text-subhead font-semibold text-ios-green mb-3">Adaugă factură</p>
+              <p className="text-subhead font-semibold text-ios-green mb-3">Adaugă factură lunară</p>
               <div className="grid grid-cols-3 gap-2">
                 <div>
                   <label className="input-label">Lună</label>
-                  <select className="input" value={invForm.month} onChange={e => setInvForm({ ...invForm, month: e.target.value })}>
-                    {MONTHS.map((m, i) => <option key={i} value={i+1}>{m}</option>)}
-                  </select>
+                  <div className="relative">
+                    <select className="input appearance-none pr-8" value={invForm.month} onChange={e => setInvForm({ ...invForm, month: e.target.value })}>
+                      {MONTHS_FULL.map((m, i) => <option key={i} value={i+1}>{m}</option>)}
+                    </select>
+                    <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-ios-tertiary pointer-events-none" />
+                  </div>
                 </div>
                 <div>
                   <label className="input-label">An</label>
-                  <select className="input" value={invForm.year} onChange={e => setInvForm({ ...invForm, year: e.target.value })}>
-                    {years.map(y => <option key={y} value={y}>{y}</option>)}
-                  </select>
+                  <div className="relative">
+                    <select className="input appearance-none pr-8" value={invForm.year} onChange={e => setInvForm({ ...invForm, year: e.target.value })}>
+                      {years.map(y => <option key={y} value={y}>{y}</option>)}
+                    </select>
+                    <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-ios-tertiary pointer-events-none" />
+                  </div>
                 </div>
                 <div>
                   <label className="input-label">Sumă (€)</label>
-                  <input className="input" type="number" placeholder="300" value={invForm.amount}
-                    onChange={e => setInvForm({ ...invForm, amount: e.target.value })} />
+                  <input className="input" type="number" placeholder={selected.monthly_amount || "300"}
+                    value={invForm.amount} onChange={e => setInvForm({ ...invForm, amount: e.target.value })} />
                 </div>
               </div>
+              {selected.monthly_amount && !invForm.amount && (
+                <button onClick={() => setInvForm({ ...invForm, amount: selected.monthly_amount })}
+                  className="text-footnote text-ios-blue mt-2 hover:underline">
+                  Folosește suma lunară ({fmtCurrency(selected.monthly_amount)})
+                </button>
+              )}
               <button onClick={addInvoice} disabled={loading || !invForm.amount} className="btn-primary w-full mt-3">
-                {loading ? 'Se salvează...' : 'Adaugă factură'}
+                {loading ? 'Se salvează...' : 'Adaugă'}
               </button>
-              <p className="text-caption1 text-ios-green/70 mt-2">Dacă există deja o factură pentru luna selectată, va fi actualizată.</p>
             </div>
 
-            {/* Invoice list */}
             <div>
-              <p className="text-subhead font-semibold text-ios-primary mb-2">Istoric facturi</p>
+              <p className="text-subhead font-semibold text-ios-primary mb-2">Istoric ({invoices.length} facturi)</p>
               {invoices.length === 0 ? (
-                <p className="text-footnote text-ios-tertiary text-center py-6">Nicio factură înregistrată încă</p>
+                <p className="text-footnote text-ios-tertiary text-center py-4">Nicio factură înregistrată</p>
               ) : (
-                <div className="space-y-1">
+                <div className="space-y-1.5">
                   {invoices.map(inv => (
                     <div key={inv.id} className="flex items-center justify-between p-3 bg-ios-bg rounded-ios">
-                      <div>
-                        <p className="text-subhead font-semibold text-ios-primary">{MONTHS[inv.month-1]} {inv.year}</p>
-                      </div>
+                      <p className="text-subhead font-semibold text-ios-primary">{MONTHS_FULL[inv.month-1]} {inv.year}</p>
                       <div className="flex items-center gap-3">
                         <p className="text-subhead font-bold text-ios-green">{fmtCurrency(inv.amount)}</p>
                         <button onClick={() => delInvoice(inv.id)} className="p-1.5 hover:bg-red-50 rounded-ios text-ios-tertiary hover:text-ios-red transition-colors">
