@@ -1,0 +1,84 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Inter', sans-serif;
+  background-color: #F2F2F7;
+  color: #000000;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+@layer components {
+  /* Buttons */
+  .btn-primary {
+    @apply bg-ios-blue text-white px-4 py-2.5 rounded-ios text-subhead font-semibold
+           hover:opacity-90 active:opacity-80 transition-opacity disabled:opacity-40
+           disabled:cursor-not-allowed select-none;
+  }
+  .btn-secondary {
+    @apply bg-ios-fill text-ios-blue px-4 py-2.5 rounded-ios text-subhead font-semibold
+           hover:bg-ios-fill2 active:opacity-80 transition-all disabled:opacity-40 select-none;
+  }
+  .btn-danger {
+    @apply bg-ios-red text-white px-4 py-2.5 rounded-ios text-subhead font-semibold
+           hover:opacity-90 active:opacity-80 transition-opacity select-none;
+  }
+  .btn-ghost {
+    @apply text-ios-blue px-3 py-2 rounded-ios text-subhead font-semibold
+           hover:bg-ios-fill active:bg-ios-fill2 transition-colors select-none;
+  }
+
+  /* Inputs */
+  .input {
+    @apply w-full bg-ios-fill border-0 rounded-ios px-3.5 py-3 text-body text-ios-primary
+           placeholder-ios-tertiary focus:outline-none focus:ring-2 focus:ring-ios-blue/30
+           focus:bg-white transition-all;
+  }
+  .input-label {
+    @apply block text-footnote font-semibold text-ios-secondary uppercase tracking-wide mb-1.5;
+  }
+
+  /* Cards */
+  .card {
+    @apply bg-ios-card rounded-ios-lg shadow-ios overflow-hidden;
+  }
+  .card-section {
+    @apply bg-ios-card rounded-ios-lg shadow-ios-sm;
+  }
+
+  /* List rows (iOS grouped style) */
+  .list-row {
+    @apply flex items-center px-4 py-3 bg-white border-b border-ios-separator/50 last:border-0;
+  }
+
+  /* Badges */
+  .badge {
+    @apply inline-flex items-center px-2 py-0.5 rounded-full text-caption1 font-semibold;
+  }
+  .badge-blue   { @apply badge bg-blue-50 text-ios-blue; }
+  .badge-green  { @apply badge bg-green-50 text-ios-green; }
+  .badge-orange { @apply badge bg-orange-50 text-ios-orange; }
+  .badge-red    { @apply badge bg-red-50 text-ios-red; }
+  .badge-gray   { @apply badge bg-ios-fill text-ios-secondary; }
+  .badge-purple { @apply badge bg-purple-50 text-ios-purple; }
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #C6C6C8; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #AEAEB2; }
+
+/* iOS-style section header */
+.section-header {
+  font-size: 13px;
+  font-weight: 600;
+  color: #6C6C70;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 0 16px 8px;
+}
