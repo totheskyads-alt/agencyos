@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import Sidebar from '@/components/Sidebar';
 import GlobalTimer from '@/components/GlobalTimer';
+import { TimerProvider } from '@/lib/timerContext';
 
 export default function DashboardLayout({ children }) {
   const router = useRouter();
@@ -32,14 +33,16 @@ export default function DashboardLayout({ children }) {
   );
 
   return (
-    <div className="flex min-h-screen bg-ios-bg">
-      <Sidebar user={user} profile={profile} />
-      <main className="flex-1 lg:ml-60 pt-16 lg:pt-0 pb-14 min-h-screen">
-        <div className="p-4 lg:p-6 max-w-7xl mx-auto">
-          {children}
-        </div>
-      </main>
-      <GlobalTimer />
-    </div>
+    <TimerProvider>
+      <div className="flex min-h-screen bg-ios-bg">
+        <Sidebar user={user} profile={profile} />
+        <main className="flex-1 lg:ml-60 pt-16 lg:pt-0 pb-16 min-h-screen">
+          <div className="p-4 lg:p-6 max-w-7xl mx-auto">
+            {children}
+          </div>
+        </main>
+        <GlobalTimer />
+      </div>
+    </TimerProvider>
   );
 }
