@@ -3,6 +3,7 @@ import { useState, useEffect, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
 import Modal from '@/components/Modal';
 import { fmtDate, getElapsed, fmtClock } from '@/lib/utils';
+import { useTimer } from '@/lib/timerContext';
 import {
   Plus, Search, ChevronDown, ArrowLeft, MessageSquare,
   Paperclip, Trash2, Send, Archive, Kanban, MoreHorizontal,
@@ -550,47 +551,7 @@ function TaskRow({ task, members, boardColumns, taskLabels, activeTimer, elapsed
   );
 }
 
-// ─── Timer Active Hook ────────────────────────────────────────────────────────
-function useTaskTimer(userId) {
-  const [activeTimer, setActiveTimer] = useState(null);
-  const [elapsed, setElapsed] = useState(0);
-  const intervalRef = useRef(null);
 
-  async function loadTimer() {
-    if (!userId) return;
-    const { data } = await supabase.from('time_entries')
-      .select('*').eq('user_id', userId).is('end_time', null).maybeSingle();
-    setActiveTimer(data || null);
-  }
-
-  useEffect(() => {
-    clearInterval(intervalRef.current);
-    if (!activeTimer?.start_time) { setElapsed(0); return; }
-    const tick = () => setElapsed(getElapsed(activeTimer.start_time));
-    tick();
-    intervalRef.current = setInterval(tick, 1000);
-    return () => clearInterval(intervalRef.current);
-  }, [activeTimer]);
-
-  async function startTimer(task, uid) {
-    if (activeTimer) {
-      await supabase.from('time_entries').update({ end_time: new Date().toISOString(), duration_seconds: getElapsed(activeTimer.start_time) }).eq('id', activeTimer.id);
-    }
-    const { data } = await supabase.from('time_entries').insert({
-      user_id: uid, task_id: task.id, project_id: task.project_id,
-      description: task.title, start_time: new Date().toISOString(),
-    }).select().single();
-    setActiveTimer(data);
-  }
-
-  async function stopTimer() {
-    if (!activeTimer) return;
-    await supabase.from('time_entries').update({ end_time: new Date().toISOString(), duration_seconds: getElapsed(activeTimer.start_time) }).eq('id', activeTimer.id);
-    setActiveTimer(null); setElapsed(0);
-  }
-
-  return { activeTimer, elapsed, loadTimer, startTimer, stopTimer };
-}
 
 // ─── MAIN PAGE ────────────────────────────────────────────────────────────────
 export default function TasksPage() {
@@ -624,7 +585,7 @@ export default function TasksPage() {
   const [showMemberDrop, setShowMemberDrop] = useState(false);
   const memberRef = useRef(null);
 
-  const { activeTimer, elapsed, loadTimer, startTimer, stopTimer } = useTaskTimer(currentUser?.id);
+  const { activeTimer, elapsed, startTimer, stopTimer } = useTimer();
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data: { user } }) => { setCurrentUser(user); loadTimer(); });
@@ -723,7 +684,7 @@ export default function TasksPage() {
     setTaskModal(null); loadTasks();
   }
 
-  async function handleStartTimer(task) { await startTimer(task, currentUser?.id); }
+  async function handleStartTimer(task) { await startTimer({ projectId: task.project_id, taskId: task.id, description: task.title }); }
 
   // Filters
   let visible = tasks;
