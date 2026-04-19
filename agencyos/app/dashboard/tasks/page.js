@@ -27,6 +27,25 @@ const PRIORITY = {
 const COL_COLORS = ['#007AFF','#34C759','#FF9500','#FF3B30','#AF52DE','#32ADE6','#5856D6','#FF2D55','#AEAEB2'];
 const VIEW_KEY = 'agencyos_tasks_view';
 
+
+// ─── Download File Helper ─────────────────────────────────────────────────────
+async function downloadFile(url, filename) {
+  try {
+    const res = await fetch(url);
+    const blob = await res.blob();
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = filename || 'file';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(a.href);
+  } catch {
+    window.open(url, '_blank');
+  }
+}
+
+
 // ─── Quick Timer ──────────────────────────────────────────────────────────────
 function QuickTimer({ task, activeTimer, elapsed, onStart, onStop }) {
   const isActive = activeTimer?.task_id === task.id;
@@ -438,10 +457,11 @@ function TaskDetail({ task, members, boardColumns, projects, labels: allLabels, 
                           <>
                             {c.content && <p className="text-subhead whitespace-pre-wrap">{c.content}</p>}
                             {c.file_url && (
-                              <a href={c.file_url} target="_blank" rel="noopener noreferrer" download={c.file_name}
+                              <button onClick={e => { e.stopPropagation(); downloadFile(c.file_url, c.file_name); }}
                                 className="flex items-center gap-1.5 mt-1.5 text-footnote text-ios-blue hover:underline">
                                 <Paperclip className="w-3.5 h-3.5 shrink-0" />{c.file_name}
-                              </a>
+                                <span className="text-caption2 text-ios-tertiary">(download)</span>
+                              </button>
                             )}
                           </>
                         )}
