@@ -1,372 +1,217 @@
 'use client';
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
-import { fmtDuration, fmtCurrency, fmtDate, parseUTC } from '@/lib/utils';
-import { Download, Settings2, TrendingUp, Euro, Clock, ChevronDown, Check, X } from 'lucide-react';
+import { useRole } from '@/lib/useRole';
+import { fmtDuration, fmtCurrency, parseUTC } from '@/lib/utils';
+import { Clock, Euro, TrendingUp, TrendingDown, Users, BarChart3, Lock } from 'lucide-react';
 
-const MONTHS = ['Ian','Feb','Mar','Apr','Mai','Iun','Iul','Aug','Sep','Oct','Nov','Dec'];
+const MONTHS_SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
-const ALL_COLUMNS = [
-  { key: 'client',        label: 'Client',             default: true },
-  { key: 'type',          label: 'Tip client',         default: true },
-  { key: 'project',       label: 'Proiect',            default: true },
-  { key: 'hours',         label: 'Ore lucrate',        default: true },
-  { key: 'billed',        label: 'Facturat (€)',       default: true },
-  { key: 'cph',           label: '€/oră',              default: true },
-  { key: 'entries',       label: 'Nr. înregistrări',   default: false },
-  { key: 'billing_day',   label: 'Zi facturare',       default: false },
-  { key: 'monthly_amt',   label: 'Sumă lunară',        default: false },
-  { key: 'last_activity', label: 'Ultima activitate',  default: false },
+const RANGES = [
+  { key: '7days',   label: '7 days' },
+  { key: '30days',  label: '30 days' },
+  { key: '3months', label: '3 months' },
+  { key: '1year',   label: 'This year' },
 ];
 
 const CLIENT_TYPES = {
-  direct:      { label: 'Direct',      color: 'badge-blue' },
-  whitelabel:  { label: 'White-label', color: 'badge-purple' },
-  colaborator: { label: 'Colaborator', color: 'badge-orange' },
+  direct:      { label: 'Direct',       color: '#007AFF' },
+  whitelabel:  { label: 'White-label',  color: '#AF52DE' },
+  colaborator: { label: 'Collaborator', color: '#FF9500' },
 };
 
-const RANGES = [
-  { key: '7days',   label: 'Ultimele 7 zile' },
-  { key: '14days',  label: 'Ultimele 14 zile' },
-  { key: '30days',  label: 'Ultimele 30 zile' },
-  { key: '3months', label: 'Ultimele 3 luni' },
-  { key: '1year',   label: 'Ultimul an' },
-  { key: 'custom',  label: 'Custom' },
-];
-
-const STORAGE_KEY = 'agencyos_report_cols';
-
-function LineChart({ data, color = '#007AFF', formatVal }) {
-  const pts = data.filter(d => d.value > 0);
-  if (pts.length < 2) return (
-    <div className="flex items-center justify-center h-24 text-ios-tertiary text-footnote">
-      Date insuficiente
-    </div>
-  );
-  const values = data.map(d => d.value);
-  const max = Math.max(...values, 1);
-  const W = 400, H = 90, PAD = 20;
-  const points = data.map((d, i) => ({
-    x: PAD + (i / (data.length - 1)) * (W - PAD * 2),
-    y: d.value > 0 ? PAD + ((max - d.value) / max) * (H - PAD * 2) : H,
-    ...d,
-  }));
-  const pathD = points.filter(p => p.value > 0).map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ');
+function MiniBar({ value, max, color }) {
+  const pct = max > 0 ? Math.min((value / max) * 100, 100) : 0;
   return (
-    <div className="w-full overflow-x-auto">
-      <svg viewBox={`0 0 ${W} ${H + 20}`} className="w-full" style={{ minWidth: 240 }}>
-        {[0, 0.5, 1].map(t => <line key={t} x1={PAD} x2={W-PAD} y1={PAD+t*(H-PAD*2)} y2={PAD+t*(H-PAD*2)} stroke="#F2F2F7" strokeWidth="1" />)}
-        <path d={pathD} fill="none" stroke={color} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
-        {points.map((p, i) => p.value > 0 && (
-          <g key={i}>
-            <circle cx={p.x} cy={p.y} r="4" fill="white" stroke={color} strokeWidth="2" />
-            <text x={p.x} y={p.y - 8} textAnchor="middle" fontSize="9" fill={color} fontWeight="700">
-              {formatVal ? formatVal(p.value) : p.value}
-            </text>
-            <text x={p.x} y={H + 14} textAnchor="middle" fontSize="9" fill="#AEAEB2">{p.label}</text>
-          </g>
-        ))}
-      </svg>
+    <div className="h-1.5 bg-ios-fill rounded-full overflow-hidden">
+      <div className="h-full rounded-full transition-all" style={{ width: `${pct}%`, background: color || '#007AFF' }} />
     </div>
   );
 }
 
-function BarGroup({ data, keys, colors }) {
-  if (!data || data.length === 0) return null;
-  const max = Math.max(...data.flatMap(d => keys.map(k => d[k] || 0)), 1);
-  const barW = Math.max(6, Math.floor(60 / keys.length));
+function StatCard({ label, value, sub, icon: Icon, color }) {
   return (
-    <div className="w-full overflow-x-auto">
-      <div className="flex items-end gap-1 h-28 min-w-0" style={{ minWidth: data.length * 50 }}>
-        {data.map((d, i) => (
-          <div key={i} className="flex-1 flex flex-col items-center gap-0.5">
-            <div className="flex items-end gap-0.5 h-20">
-              {keys.map((k, ki) => (
-                <div key={k} className="rounded-t-ios-sm transition-all" title={`${k}: ${d[k]}`}
-                  style={{ width: barW, height: `${Math.max((d[k]||0)/max*72, (d[k]||0) > 0 ? 3 : 0)}px`, background: colors[ki] }} />
-              ))}
-            </div>
-            <span className="text-caption2 text-ios-tertiary whitespace-nowrap">{d.label}</span>
-          </div>
-        ))}
+    <div className="card p-4">
+      <div className={`w-9 h-9 rounded-ios flex items-center justify-center mb-3 ${color}`}>
+        <Icon className="w-4 h-4" />
       </div>
+      <p className="text-title3 font-bold text-ios-primary">{value}</p>
+      <p className="text-footnote text-ios-secondary">{label}</p>
+      {sub && <p className="text-caption1 text-ios-tertiary mt-0.5">{sub}</p>}
     </div>
   );
 }
 
 export default function ReportsPage() {
+  const { can, isManager } = useRole();
+  const [range, setRange] = useState('30days');
+  const [activeSection, setActiveSection] = useState('time');
+  const [entries, setEntries] = useState([]);
   const [projects, setProjects] = useState([]);
   const [clients, setClients] = useState([]);
   const [members, setMembers] = useState([]);
-  const [selProject, setSelProject] = useState('');
-  const [selClient, setSelClient] = useState('');
-  const [selMember, setSelMember] = useState('');
-  const [selType, setSelType] = useState('');
-  const [range, setRange] = useState('30days');
-  const [customFrom, setCustomFrom] = useState('');
-  const [customTo, setCustomTo] = useState('');
-  const [entries, setEntries] = useState([]);
   const [billing, setBilling] = useState([]);
+  const [expenses, setExpenses] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [tab, setTab] = useState('table');
-  const [showColPicker, setShowColPicker] = useState(false);
-  const colPickerRef = useRef(null);
-
-  // Load saved columns from localStorage
-  const [activeCols, setActiveCols] = useState(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      return saved ? JSON.parse(saved) : ALL_COLUMNS.filter(c => c.default).map(c => c.key);
-    } catch { return ALL_COLUMNS.filter(c => c.default).map(c => c.key); }
-  });
-
-  useEffect(() => {
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(activeCols)); } catch {}
-  }, [activeCols]);
-
-  useEffect(() => {
-    const handler = (e) => { if (colPickerRef.current && !colPickerRef.current.contains(e.target)) setShowColPicker(false); };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, []);
+  const [filterMember, setFilterMember] = useState('');
+  const [filterProject, setFilterProject] = useState('');
 
   useEffect(() => { loadMeta(); }, []);
-  useEffect(() => { if (range !== 'custom') loadData(); }, [range, selProject, selClient, selMember, selType]);
+  useEffect(() => { loadData(); }, [range, filterMember, filterProject]);
 
   async function loadMeta() {
     const [{ data: proj }, { data: cli }, { data: mem }] = await Promise.all([
-      supabase.from('projects').select('id, name, color, client_id, billing_day, monthly_amount, clients(name, client_type)').order('name'),
-      supabase.from('clients').select('id, name, client_type').order('name'),
-      supabase.from('profiles').select('id, full_name, email').order('full_name'),
+      supabase.from('projects').select('id,name,color,client_id,monthly_amount,billing_day,clients(name,client_type)').order('name'),
+      supabase.from('clients').select('id,name,client_type').order('name'),
+      supabase.from('profiles').select('id,full_name,email').order('full_name'),
     ]);
-    setProjects(proj || []); setClients(cli || []); setMembers(mem || []);
+    setProjects(proj || []);
+    setClients(cli || []);
+    setMembers(mem || []);
   }
 
-  function getDateRange() {
+  function getDateFrom() {
     const now = new Date();
-    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     switch (range) {
-      case '7days':   return { from: new Date(today.getTime() - 6*86400000).toISOString(), to: now.toISOString() };
-      case '14days':  return { from: new Date(today.getTime() - 13*86400000).toISOString(), to: now.toISOString() };
-      case '30days':  return { from: new Date(today.getTime() - 29*86400000).toISOString(), to: now.toISOString() };
-      case '3months': return { from: new Date(now.getFullYear(), now.getMonth() - 2, 1).toISOString(), to: now.toISOString() };
-      case '1year':   return { from: new Date(now.getFullYear() - 1, now.getMonth(), 1).toISOString(), to: now.toISOString() };
-      case 'custom':  return { from: customFrom + 'T00:00:00Z', to: customTo + 'T23:59:59Z' };
-      default:        return { from: new Date(today.getTime() - 29*86400000).toISOString(), to: now.toISOString() };
+      case '7days':   return new Date(now.getTime() - 6 * 86400000).toISOString();
+      case '30days':  return new Date(now.getTime() - 29 * 86400000).toISOString();
+      case '3months': return new Date(now.getFullYear(), now.getMonth() - 2, 1).toISOString();
+      case '1year':   return new Date(now.getFullYear(), 0, 1).toISOString();
+      default:        return new Date(now.getTime() - 29 * 86400000).toISOString();
     }
   }
 
   async function loadData() {
     setLoading(true);
-    const { from, to } = getDateRange();
+    const from = getDateFrom();
     let q = supabase.from('time_entries')
-      .select('*, profiles(full_name,email), projects(id,name,color,client_id,billing_day,monthly_amount,clients(name,client_type))')
-      .not('end_time', 'is', null).gte('created_at', from).lte('created_at', to)
-      .order('created_at', { ascending: true });
-    if (selProject) q = q.eq('project_id', selProject);
-    if (selMember) q = q.eq('user_id', selMember);
+      .select('*, profiles(full_name,email), projects(id,name,color,client_id,monthly_amount,clients(name,client_type))')
+      .not('end_time', 'is', null).gte('created_at', from).order('created_at');
+    if (filterMember) q = q.eq('user_id', filterMember);
+    if (filterProject) q = q.eq('project_id', filterProject);
 
-    let bq = supabase.from('billing').select('*, clients(name, client_type)').order('year').order('month');
-    if (selClient) bq = bq.eq('client_id', selClient);
-
-    const [{ data: ent }, { data: bil }] = await Promise.all([q, bq]);
-
-    let filtered = ent || [];
-    if (selType) filtered = filtered.filter(e => e.projects?.clients?.client_type === selType);
-    if (selClient) filtered = filtered.filter(e => e.projects?.client_id === selClient);
-
-    setEntries(filtered); setBilling(bil || []);
+    const [{ data: ent }, { data: bil }, { data: exp }] = await Promise.all([
+      q,
+      supabase.from('billing').select('*, clients(name,client_type)').order('year').order('month'),
+      supabase.from('expenses').select('*').order('year').order('month'),
+    ]);
+    setEntries(ent || []);
+    setBilling(bil || []);
+    setExpenses(exp || []);
     setLoading(false);
   }
 
-  function getMonths() {
-    const { from } = getDateRange();
-    const now = new Date();
-    const months = [];
-    let cur = new Date(new Date(from).getFullYear(), new Date(from).getMonth(), 1);
-    while (cur <= now) {
-      months.push({ year: cur.getFullYear(), month: cur.getMonth() + 1, label: MONTHS[cur.getMonth()] });
-      cur = new Date(cur.getFullYear(), cur.getMonth() + 1, 1);
-    }
-    return months.map(m => {
-      const ent = entries.filter(e => { const d = parseUTC(e.created_at); return d && d.getMonth()+1 === m.month && d.getFullYear() === m.year; });
-      const bil = billing.filter(b => b.month === m.month && b.year === m.year && b.status === 'paid');
-      const secs = ent.reduce((a, e) => a + (e.duration_seconds || 0), 0);
-      const hours = secs / 3600;
-      const billed = bil.reduce((a, b) => a + (b.amount || 0), 0);
-      // €/oră from monthly_amount of projects (not just billed)
-      const projMonthly = [...new Set(ent.map(e => e.project_id))].reduce((a, pid) => {
-        const proj = ent.find(e => e.project_id === pid)?.projects;
-        return a + (proj?.monthly_amount || 0);
-      }, 0);
-      const cph = hours > 0 ? (projMonthly > 0 ? projMonthly / hours : billed > 0 ? billed / hours : 0) : 0;
-      return { ...m, secs, hours, billed, cph, entryCount: ent.length, projMonthly };
-    });
-  }
-
-  function getTableData() {
-    const map = {};
-    entries.forEach(e => {
-      const pid = e.project_id; if (!pid) return;
-      if (!map[pid]) map[pid] = {
-        id: pid, project: e.projects?.name || '—', client: e.projects?.clients?.name || '—',
-        client_type: e.projects?.clients?.client_type || 'direct',
-        client_id: e.projects?.client_id, color: e.projects?.color || '#007AFF',
-        billing_day: e.projects?.billing_day, monthly_amt: e.projects?.monthly_amount,
-        secs: 0, entries: 0, lastActivity: null, billed: 0,
-      };
-      map[pid].secs += (e.duration_seconds || 0);
-      map[pid].entries++;
-      if (!map[pid].lastActivity || e.created_at > map[pid].lastActivity) map[pid].lastActivity = e.created_at;
-    });
-    billing.filter(b => b.status === 'paid').forEach(b => {
-      Object.values(map).forEach(p => { if (p.client_id === b.client_id) p.billed += (b.amount || 0); });
-    });
-    return Object.values(map).map(p => ({
-      ...p, hours: p.secs / 3600,
-      // €/oră: use monthly_amount if set, else use billed
-      cph: p.secs > 0 ? ((p.monthly_amt || p.billed) / (p.secs / 3600)) : null,
-    })).sort((a, b) => b.hours - a.hours);
-  }
-
-  // Group by client type
-  function getByType() {
-    const byType = { direct: [], whitelabel: [], colaborator: [] };
-    getTableData().forEach(p => {
-      const t = p.client_type || 'direct';
-      if (byType[t]) byType[t].push(p);
-    });
-    return byType;
-  }
-
-  const monthlyData = getMonths();
-  const tableData = getTableData();
-  const byType = getByType();
+  // ── Computed values ──────────────────────────────────────────────────────
   const totalSecs = entries.reduce((a, e) => a + (e.duration_seconds || 0), 0);
-  const totalBilled = billing.filter(b => b.status === 'paid').reduce((a, b) => a + (b.amount || 0), 0);
-  const totalMonthly = [...new Set(entries.map(e => e.project_id))].reduce((a, pid) => {
-    const proj = entries.find(e => e.project_id === pid)?.projects;
-    return a + (proj?.monthly_amount || 0);
-  }, 0);
-  const avgCph = totalSecs > 0 && (totalMonthly || totalBilled) > 0 ? (totalMonthly || totalBilled) / (totalSecs / 3600) : 0;
+  const from = getDateFrom();
+  const filteredBilling = billing.filter(b => b.status === 'paid' && b.created_at && parseUTC(b.created_at) >= parseUTC(from));
+  const totalPaid = filteredBilling.reduce((a, b) => a + (b.amount || 0), 0);
+  const filteredExpenses = expenses.filter(e => e.date && new Date(e.date) >= parseUTC(from));
+  const totalExpenses = filteredExpenses.reduce((a, e) => a + (e.amount || 0), 0);
+  const netProfit = totalPaid - totalExpenses;
+  const avgCph = totalSecs > 0 && totalPaid > 0 ? totalPaid / (totalSecs / 3600) : 0;
 
-  function toggleCol(key) {
-    setActiveCols(prev => prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key]);
+  // By project
+  const byProject = {};
+  entries.forEach(e => {
+    const pid = e.project_id; if (!pid) return;
+    if (!byProject[pid]) byProject[pid] = { project: e.projects, secs: 0, entries: 0 };
+    byProject[pid].secs += (e.duration_seconds || 0);
+    byProject[pid].entries++;
+  });
+  const projectList = Object.values(byProject).sort((a, b) => b.secs - a.secs);
+  const maxSecs = Math.max(...projectList.map(p => p.secs), 1);
+
+  // By member
+  const byMember = {};
+  entries.forEach(e => {
+    const uid = e.user_id; if (!uid) return;
+    if (!byMember[uid]) byMember[uid] = { profile: e.profiles, secs: 0 };
+    byMember[uid].secs += (e.duration_seconds || 0);
+  });
+  const memberList = Object.values(byMember).sort((a, b) => b.secs - a.secs);
+  const maxMemberSecs = Math.max(...memberList.map(m => m.secs), 1);
+
+  // By client type
+  const byType = {};
+  entries.forEach(e => {
+    const t = e.projects?.clients?.client_type || 'direct';
+    if (!byType[t]) byType[t] = { secs: 0, projects: new Set() };
+    byType[t].secs += (e.duration_seconds || 0);
+    if (e.project_id) byType[t].projects.add(e.project_id);
+  });
+
+  // Monthly breakdown (last 6 months)
+  const now = new Date();
+  const months6 = Array.from({ length: 6 }, (_, i) => {
+    const d = new Date(now.getFullYear(), now.getMonth() - (5 - i), 1);
+    return { year: d.getFullYear(), month: d.getMonth() + 1, label: MONTHS_SHORT[d.getMonth()] };
+  });
+  const monthlyData = months6.map(m => {
+    const secs = entries.filter(e => {
+      const d = parseUTC(e.created_at);
+      return d && d.getMonth() + 1 === m.month && d.getFullYear() === m.year;
+    }).reduce((a, e) => a + (e.duration_seconds || 0), 0);
+    const paid = billing.filter(b => b.status === 'paid' && b.month === m.month && b.year === m.year).reduce((a, b) => a + (b.amount || 0), 0);
+    const exp = expenses.filter(e => e.month === m.month && e.year === m.year).reduce((a, e) => a + (e.amount || 0), 0);
+    const cph = secs > 0 && paid > 0 ? paid / (secs / 3600) : 0;
+    return { ...m, secs, paid, exp, cph };
+  });
+
+  const SECTIONS = [
+    { key: 'time',     label: '⏱ Time',     show: true },
+    { key: 'costph',   label: '€/hour',     show: isManager },
+    { key: 'billing',  label: '💰 Billing',  show: can('canViewBilling') },
+    { key: 'monthly',  label: '📅 Monthly',  show: isManager },
+  ];
+
+  if (!isManager) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[60vh] gap-4">
+        <Lock className="w-12 h-12 text-ios-label4" />
+        <p className="text-title3 font-bold text-ios-primary">Reports — Manager & Admin only</p>
+        <p className="text-subhead text-ios-secondary">Ask your Admin for access.</p>
+      </div>
+    );
   }
-
-  function exportExcel() {
-    import('xlsx').then(XLSX => {
-      const colMap = Object.fromEntries(ALL_COLUMNS.map(c => [c.key, c.label]));
-      const rows = tableData.map(p => {
-        const row = {};
-        activeCols.forEach(key => {
-          if (key === 'client') row['Client'] = p.client;
-          else if (key === 'type') row['Tip'] = CLIENT_TYPES[p.client_type]?.label || p.client_type;
-          else if (key === 'project') row['Proiect'] = p.project;
-          else if (key === 'hours') row['Ore'] = p.hours.toFixed(2);
-          else if (key === 'billed') row['Facturat (€)'] = p.billed;
-          else if (key === 'cph') row['€/oră'] = p.cph ? p.cph.toFixed(2) : '';
-          else if (key === 'entries') row['Înregistrări'] = p.entries;
-          else if (key === 'billing_day') row['Zi facturare'] = p.billing_day ? `Ziua ${p.billing_day}` : '';
-          else if (key === 'monthly_amt') row['Sumă lunară'] = p.monthly_amt || '';
-          else if (key === 'last_activity') row['Ultima activitate'] = p.lastActivity ? fmtDate(p.lastActivity) : '';
-        });
-        return row;
-      });
-      const ws = XLSX.utils.json_to_sheet(rows);
-      const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, 'Proiecte');
-      const monthRows = monthlyData.map(m => ({ 'Lună': m.label, 'Ore': m.hours.toFixed(2), 'Facturat': m.billed, '€/oră': m.cph ? m.cph.toFixed(2) : '' }));
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(monthRows), 'Lunar');
-      XLSX.writeFile(wb, `agencyos_raport.xlsx`);
-    });
-  }
-
-  const colMap = Object.fromEntries(ALL_COLUMNS.map(c => [c.key, c.label]));
 
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h1 className="text-title2 font-bold text-ios-primary">Rapoarte</h1>
-          <p className="text-subhead text-ios-secondary">Analiză avansată</p>
-        </div>
-        <div className="flex gap-2">
-          <div className="relative" ref={colPickerRef}>
-            <button onClick={() => setShowColPicker(!showColPicker)} className="btn-secondary flex items-center gap-2">
-              <Settings2 className="w-4 h-4" /> Coloane
-            </button>
-            {showColPicker && (
-              <div className="absolute right-0 top-full mt-2 bg-white rounded-ios-lg shadow-ios-modal border border-ios-separator/30 p-3 z-50 w-56">
-                <div className="flex items-center justify-between mb-2">
-                  <p className="text-footnote font-semibold text-ios-secondary uppercase tracking-wide">Coloane vizibile</p>
-                  <button onClick={() => setShowColPicker(false)}><X className="w-4 h-4 text-ios-tertiary" /></button>
-                </div>
-                {ALL_COLUMNS.map(col => (
-                  <button key={col.key} onClick={() => toggleCol(col.key)}
-                    className="flex items-center justify-between w-full px-2 py-2 rounded-ios hover:bg-ios-fill text-left transition-colors">
-                    <span className="text-subhead text-ios-primary">{col.label}</span>
-                    {activeCols.includes(col.key) && <Check className="w-4 h-4 text-ios-blue" strokeWidth={2.5} />}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-          <button onClick={exportExcel} className="btn-secondary flex items-center gap-2">
-            <Download className="w-4 h-4" /> Excel
-          </button>
+          <h1 className="text-title2 font-bold text-ios-primary">Reports</h1>
+          <p className="text-subhead text-ios-secondary">Analytics & insights</p>
         </div>
       </div>
 
       {/* Filters */}
-      <div className="card p-4 space-y-3">
-        {/* Range pills */}
-        <div className="flex gap-1.5 flex-wrap">
+      <div className="flex items-center gap-2 flex-wrap">
+        <div className="flex gap-1.5 bg-ios-fill p-1 rounded-ios">
           {RANGES.map(r => (
             <button key={r.key} onClick={() => setRange(r.key)}
-              className={`px-3 py-1.5 rounded-ios text-footnote font-semibold transition-all whitespace-nowrap ${range === r.key ? 'bg-ios-blue text-white' : 'bg-ios-fill text-ios-secondary hover:bg-ios-fill2'}`}>
+              className={`px-3 py-1.5 rounded-ios-sm text-footnote font-semibold transition-all whitespace-nowrap ${range === r.key ? 'bg-white text-ios-primary shadow-ios-sm' : 'text-ios-secondary'}`}>
               {r.label}
             </button>
           ))}
         </div>
-        {range === 'custom' && (
-          <div className="flex gap-3 flex-wrap">
-            <div className="flex-1"><label className="input-label">De la</label><input type="date" className="input" value={customFrom} onChange={e => setCustomFrom(e.target.value)} /></div>
-            <div className="flex-1"><label className="input-label">Până la</label><input type="date" className="input" value={customTo} onChange={e => setCustomTo(e.target.value)} /></div>
-            <div className="flex items-end"><button onClick={loadData} className="btn-primary">Aplică</button></div>
-          </div>
-        )}
-        <div className="flex gap-2 flex-wrap">
-          {/* Type filter */}
-          <div className="relative">
-            <select className="input appearance-none pr-8 py-2 text-footnote w-44" value={selType} onChange={e => setSelType(e.target.value)}>
-              <option value="">Toate tipurile</option>
-              {Object.entries(CLIENT_TYPES).map(([k,v]) => <option key={k} value={k}>{v.label}</option>)}
-            </select>
-            <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-ios-tertiary pointer-events-none" />
-          </div>
-          <div className="relative">
-            <select className="input appearance-none pr-8 py-2 text-footnote w-44" value={selClient} onChange={e => { setSelClient(e.target.value); setSelProject(''); }}>
-              <option value="">Toți clienții</option>
-              {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
-            <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-ios-tertiary pointer-events-none" />
-          </div>
-          <div className="relative">
-            <select className="input appearance-none pr-8 py-2 text-footnote w-44" value={selProject} onChange={e => setSelProject(e.target.value)}>
-              <option value="">Toate proiectele</option>
-              {projects.filter(p => !selClient || p.client_id === selClient).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-            </select>
-            <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-ios-tertiary pointer-events-none" />
-          </div>
-          <div className="relative">
-            <select className="input appearance-none pr-8 py-2 text-footnote w-44" value={selMember} onChange={e => setSelMember(e.target.value)}>
-              <option value="">Toată echipa</option>
-              {members.map(m => <option key={m.id} value={m.id}>{m.full_name || m.email}</option>)}
-            </select>
-            <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-ios-tertiary pointer-events-none" />
-          </div>
-        </div>
+        <select className="input py-2 text-footnote w-36" value={filterMember} onChange={e => setFilterMember(e.target.value)}>
+          <option value="">All members</option>
+          {members.map(m => <option key={m.id} value={m.id}>{m.full_name || m.email}</option>)}
+        </select>
+        <select className="input py-2 text-footnote w-36" value={filterProject} onChange={e => setFilterProject(e.target.value)}>
+          <option value="">All projects</option>
+          {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+        </select>
+      </div>
+
+      {/* Section tabs */}
+      <div className="flex gap-0.5 bg-ios-fill p-1 rounded-ios overflow-x-auto">
+        {SECTIONS.filter(s => s.show).map(s => (
+          <button key={s.key} onClick={() => setActiveSection(s.key)}
+            className={`flex-1 py-2 rounded-ios-sm text-footnote font-semibold whitespace-nowrap transition-all ${activeSection === s.key ? 'bg-white text-ios-primary shadow-ios-sm' : 'text-ios-secondary'}`}>
+            {s.label}
+          </button>
+        ))}
       </div>
 
       {loading ? (
@@ -375,145 +220,148 @@ export default function ReportsPage() {
         </div>
       ) : (
         <>
-          {/* Summary */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-            {[
-              { label: 'Total ore', value: fmtDuration(totalSecs), icon: Clock, color: 'text-ios-blue bg-blue-50' },
-              { label: 'Încasat', value: totalBilled > 0 ? fmtCurrency(totalBilled) : '—', icon: Euro, color: 'text-ios-green bg-green-50' },
-              { label: '€/oră mediu', value: avgCph > 0 ? `€${avgCph.toFixed(0)}/h` : '—', icon: TrendingUp, color: 'text-ios-orange bg-orange-50' },
-              { label: 'Proiecte active', value: tableData.length, icon: TrendingUp, color: 'text-ios-purple bg-purple-50' },
-            ].map(({ label, value, icon: Icon, color }) => (
-              <div key={label} className="card p-4">
-                <div className={`w-9 h-9 rounded-ios flex items-center justify-center mb-3 ${color}`}><Icon className="w-4 h-4" /></div>
-                <p className="text-title3 font-bold text-ios-primary">{value}</p>
-                <p className="text-footnote text-ios-secondary">{label}</p>
+          {/* ── TIME SECTION ── */}
+          {activeSection === 'time' && (
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                <StatCard label="Total hours" value={fmtDuration(totalSecs)} icon={Clock} color="text-ios-blue bg-blue-50" />
+                <StatCard label="Projects tracked" value={projectList.length} icon={BarChart3} color="text-ios-orange bg-orange-50" />
+                <StatCard label="Members tracked" value={memberList.length} icon={Users} color="text-ios-purple bg-purple-50" />
+                <StatCard label="Avg per day" value={fmtDuration(totalSecs / Math.max(range==='7days'?7:range==='30days'?30:range==='3months'?90:365,1))} icon={Clock} color="text-ios-green bg-green-50" />
               </div>
-            ))}
-          </div>
 
-          {/* Tabs */}
-          <div className="flex gap-0.5 bg-ios-fill p-1 rounded-ios overflow-x-auto">
-            {[['table','Tabel'],['bytype','Pe tip client'],['evolution','Evoluție'],['monthly','Lunar']].map(([k,v]) => (
-              <button key={k} onClick={() => setTab(k)}
-                className={`flex-1 py-2 rounded-ios-sm text-footnote font-semibold transition-all whitespace-nowrap ${tab === k ? 'bg-white text-ios-primary shadow-ios-sm' : 'text-ios-secondary'}`}>{v}</button>
-            ))}
-          </div>
-
-          {/* Table */}
-          {tab === 'table' && (
-            <div className="card overflow-hidden">
-              <div className="overflow-x-auto">
-                <table className="w-full text-left">
-                  <thead className="bg-ios-bg border-b border-ios-separator/30">
-                    <tr>
-                      {activeCols.map(key => (
-                        <th key={key} className="px-4 py-3 text-caption1 font-semibold text-ios-secondary uppercase tracking-wide whitespace-nowrap">{colMap[key]}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {tableData.length === 0 ? (
-                      <tr><td colSpan={activeCols.length} className="px-4 py-8 text-center text-ios-tertiary text-subhead">Nicio dată în perioada selectată</td></tr>
-                    ) : tableData.map(p => (
-                      <tr key={p.id} className="border-t border-ios-separator/20 hover:bg-ios-bg">
-                        {activeCols.includes('client') && <td className="px-4 py-3 text-subhead font-medium">{p.client}</td>}
-                        {activeCols.includes('type') && (
-                          <td className="px-4 py-3">
-                            <span className={`badge ${CLIENT_TYPES[p.client_type]?.color || 'badge-gray'}`}>
-                              {CLIENT_TYPES[p.client_type]?.label || p.client_type}
-                            </span>
-                          </td>
-                        )}
-                        {activeCols.includes('project') && (
-                          <td className="px-4 py-3">
-                            <div className="flex items-center gap-2">
-                              <div className="w-2 h-2 rounded-full" style={{ background: p.color }} />
-                              <span className="text-subhead font-semibold">{p.project}</span>
-                            </div>
-                          </td>
-                        )}
-                        {activeCols.includes('hours') && <td className="px-4 py-3 text-subhead font-semibold">{p.hours.toFixed(1)}h</td>}
-                        {activeCols.includes('billed') && (
-                          <td className="px-4 py-3 text-subhead font-bold text-ios-green">
-                            {p.billed > 0 ? fmtCurrency(p.billed) : <span className="text-ios-tertiary font-normal">—</span>}
-                          </td>
-                        )}
-                        {activeCols.includes('cph') && (
-                          <td className="px-4 py-3">
-                            {p.cph ? <span className={`badge ${p.cph >= 100 ? 'badge-green' : p.cph >= 50 ? 'badge-orange' : 'badge-red'}`}>€{p.cph.toFixed(0)}/h</span>
-                              : <span className="text-ios-tertiary text-footnote">—</span>}
-                          </td>
-                        )}
-                        {activeCols.includes('entries') && <td className="px-4 py-3 text-footnote text-ios-secondary">{p.entries}</td>}
-                        {activeCols.includes('billing_day') && <td className="px-4 py-3 text-footnote text-ios-secondary">{p.billing_day ? `Ziua ${p.billing_day}` : '—'}</td>}
-                        {activeCols.includes('monthly_amt') && <td className="px-4 py-3 text-footnote text-ios-secondary">{p.monthly_amt ? fmtCurrency(p.monthly_amt) : '—'}</td>}
-                        {activeCols.includes('last_activity') && <td className="px-4 py-3 text-footnote text-ios-secondary">{p.lastActivity ? fmtDate(p.lastActivity) : '—'}</td>}
-                      </tr>
+              {/* By project */}
+              <div className="card p-4">
+                <p className="text-headline font-semibold mb-4">Time by project</p>
+                {projectList.length === 0 ? <p className="text-footnote text-ios-tertiary text-center py-4">No data</p> : (
+                  <div className="space-y-3">
+                    {projectList.map(({ project, secs }) => (
+                      <div key={project?.id}>
+                        <div className="flex items-center justify-between mb-1">
+                          <div className="flex items-center gap-2">
+                            <div className="w-2 h-2 rounded-full" style={{ background: project?.color || '#007AFF' }} />
+                            <span className="text-subhead font-medium">{project?.name}</span>
+                            {project?.clients?.name && <span className="text-caption1 text-ios-secondary">· {project.clients.name}</span>}
+                          </div>
+                          <span className="text-footnote font-semibold text-ios-secondary">{fmtDuration(secs)}</span>
+                        </div>
+                        <MiniBar value={secs} max={maxSecs} color={project?.color} />
+                      </div>
                     ))}
-                  </tbody>
-                </table>
+                  </div>
+                )}
+              </div>
+
+              {/* By member */}
+              {memberList.length > 1 && (
+                <div className="card p-4">
+                  <p className="text-headline font-semibold mb-4">Time by member</p>
+                  <div className="space-y-3">
+                    {memberList.map(({ profile, secs }) => {
+                      const initials = (profile?.full_name || profile?.email || '?').split(' ').map(w => w[0]).join('').toUpperCase().slice(0,2);
+                      return (
+                        <div key={profile?.id || Math.random()}>
+                          <div className="flex items-center justify-between mb-1">
+                            <div className="flex items-center gap-2">
+                              <div className="w-6 h-6 bg-ios-blue rounded-full flex items-center justify-center text-white text-[9px] font-bold">{initials}</div>
+                              <span className="text-subhead font-medium">{profile?.full_name || profile?.email}</span>
+                            </div>
+                            <span className="text-footnote font-semibold text-ios-secondary">{fmtDuration(secs)}</span>
+                          </div>
+                          <MiniBar value={secs} max={maxMemberSecs} color="#007AFF" />
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* By client type */}
+              <div className="grid lg:grid-cols-3 gap-3">
+                {Object.entries(CLIENT_TYPES).map(([typeKey, typeInfo]) => {
+                  const d = byType[typeKey] || { secs: 0, projects: new Set() };
+                  return (
+                    <div key={typeKey} className="card p-4">
+                      <div className="w-2.5 h-2.5 rounded-full mb-2" style={{ background: typeInfo.color }} />
+                      <p className="text-subhead font-semibold text-ios-primary">{typeInfo.label}</p>
+                      <p className="text-title3 font-bold mt-1">{fmtDuration(d.secs)}</p>
+                      <p className="text-caption1 text-ios-tertiary">{d.projects.size} projects</p>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           )}
 
-          {/* By type */}
-          {tab === 'bytype' && (
+          {/* ── €/HOUR SECTION ── */}
+          {activeSection === 'costph' && (
             <div className="space-y-4">
-              {Object.entries(CLIENT_TYPES).map(([typeKey, typeInfo]) => {
-                const items = byType[typeKey] || [];
-                if (items.length === 0) return null;
-                const typeSecs = items.reduce((a, p) => a + p.secs, 0);
-                const typeBilled = items.reduce((a, p) => a + p.billed, 0);
-                const typeMonthly = items.reduce((a, p) => a + (p.monthly_amt || 0), 0);
-                const typeCph = typeSecs > 0 && (typeMonthly || typeBilled) > 0 ? (typeMonthly || typeBilled) / (typeSecs / 3600) : 0;
-                return (
-                  <div key={typeKey} className="card overflow-hidden">
-                    <div className="px-4 py-3 border-b border-ios-separator/50 flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <span className={`badge ${typeInfo.color}`}>{typeInfo.label}</span>
-                        <span className="text-footnote text-ios-secondary">{items.length} proiecte</span>
-                      </div>
-                      <div className="flex gap-4 text-footnote text-ios-secondary">
-                        <span>{fmtDuration(typeSecs)}</span>
-                        {typeBilled > 0 && <span className="text-ios-green font-semibold">{fmtCurrency(typeBilled)}</span>}
-                        {typeCph > 0 && <span className="text-ios-orange font-semibold">€{typeCph.toFixed(0)}/h</span>}
-                      </div>
-                    </div>
-                    {items.map(p => (
-                      <div key={p.id} className="list-row">
-                        <div className="w-2 h-2 rounded-full mr-3" style={{ background: p.color }} />
-                        <div className="flex-1 min-w-0">
-                          <p className="text-subhead font-semibold text-ios-primary">{p.project}</p>
-                          <p className="text-caption1 text-ios-secondary">{p.client}</p>
-                        </div>
-                        <div className="flex items-center gap-3 shrink-0">
-                          <span className="text-footnote text-ios-secondary">{p.hours.toFixed(1)}h</span>
-                          {p.billed > 0 && <span className="text-footnote font-semibold text-ios-green">{fmtCurrency(p.billed)}</span>}
-                          {p.cph && <span className={`badge ${p.cph >= 100 ? 'badge-green' : p.cph >= 50 ? 'badge-orange' : 'badge-red'}`}>€{p.cph.toFixed(0)}/h</span>}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                );
-              })}
+              <div className="grid grid-cols-2 gap-3">
+                <StatCard label="Avg €/hour (overall)" value={avgCph > 0 ? `€${avgCph.toFixed(0)}/h` : '—'} icon={TrendingUp} color="text-ios-green bg-green-50"
+                  sub={avgCph > 0 ? `${fmtCurrency(totalPaid)} ÷ ${fmtDuration(totalSecs)}` : 'No billing data'} />
+                <StatCard label="Total hours billed" value={fmtDuration(totalSecs)} icon={Clock} color="text-ios-blue bg-blue-50" />
+              </div>
 
-              {/* Comparison chart */}
+              {/* €/h per project */}
+              <div className="card overflow-hidden">
+                <div className="px-4 py-3 border-b border-ios-separator/30">
+                  <p className="text-headline font-semibold">€/hour by project</p>
+                  <p className="text-footnote text-ios-secondary">Based on monthly contract value ÷ hours tracked</p>
+                </div>
+                <table className="w-full text-left">
+                  <thead className="bg-ios-bg">
+                    <tr>
+                      {['Project','Client','Hours','Monthly Rate','€/hour'].map(h => (
+                        <th key={h} className="px-4 py-3 text-caption1 font-semibold text-ios-secondary uppercase tracking-wide">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {projectList.map(({ project, secs }) => {
+                      const monthly = project?.monthly_amount || 0;
+                      const hours = secs / 3600;
+                      const cph = hours > 0 && monthly > 0 ? monthly / hours : null;
+                      return (
+                        <tr key={project?.id} className="border-t border-ios-separator/20 hover:bg-ios-bg">
+                          <td className="px-4 py-3">
+                            <div className="flex items-center gap-2">
+                              <div className="w-2 h-2 rounded-full" style={{ background: project?.color || '#007AFF' }} />
+                              <span className="text-subhead font-semibold">{project?.name}</span>
+                            </div>
+                          </td>
+                          <td className="px-4 py-3 text-footnote text-ios-secondary">{project?.clients?.name || '—'}</td>
+                          <td className="px-4 py-3 text-subhead font-medium">{fmtDuration(secs)}</td>
+                          <td className="px-4 py-3 text-footnote">{monthly > 0 ? fmtCurrency(monthly) : <span className="text-ios-tertiary">Not set</span>}</td>
+                          <td className="px-4 py-3">
+                            {cph ? (
+                              <span className={`badge ${cph >= 80 ? 'badge-green' : cph >= 40 ? 'badge-orange' : 'badge-red'}`}>
+                                €{cph.toFixed(0)}/h
+                              </span>
+                            ) : <span className="text-ios-tertiary text-footnote">—</span>}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* €/h per client type */}
               <div className="card p-4">
-                <p className="text-headline font-semibold mb-4">Comparație tipuri — Ore lucrate</p>
-                <div className="grid grid-cols-3 gap-3">
+                <p className="text-headline font-semibold mb-4">€/hour by client type</p>
+                <div className="grid lg:grid-cols-3 gap-3">
                   {Object.entries(CLIENT_TYPES).map(([typeKey, typeInfo]) => {
-                    const items = byType[typeKey] || [];
-                    const secs = items.reduce((a, p) => a + p.secs, 0);
-                    const billed = items.reduce((a, p) => a + p.billed, 0);
-                    const monthly = items.reduce((a, p) => a + (p.monthly_amt || 0), 0);
-                    const cph = secs > 0 && (monthly || billed) ? (monthly || billed) / (secs / 3600) : 0;
+                    const d = byType[typeKey] || { secs: 0 };
+                    const typeBilled = filteredBilling.filter(b => (b.clients?.client_type || 'direct') === typeKey).reduce((a, b) => a + (b.amount || 0), 0);
+                    const cph = d.secs > 0 && typeBilled > 0 ? typeBilled / (d.secs / 3600) : 0;
                     return (
-                      <div key={typeKey} className={`p-3 rounded-ios-lg border-2 ${items.length > 0 ? 'border-ios-separator/50 bg-ios-bg' : 'border-dashed border-ios-separator'}`}>
-                        <span className={`badge ${typeInfo.color} mb-2`}>{typeInfo.label}</span>
-                        <p className="text-headline font-bold text-ios-primary mt-2">{fmtDuration(secs)}</p>
-                        {billed > 0 && <p className="text-footnote text-ios-green font-semibold">{fmtCurrency(billed)}</p>}
-                        {cph > 0 && <p className="text-caption1 text-ios-orange">€{cph.toFixed(0)}/h</p>}
-                        {items.length === 0 && <p className="text-footnote text-ios-tertiary">Niciun proiect</p>}
+                      <div key={typeKey} className="bg-ios-bg rounded-ios p-3">
+                        <div className="flex items-center gap-2 mb-2">
+                          <div className="w-2.5 h-2.5 rounded-full" style={{ background: typeInfo.color }} />
+                          <span className="text-footnote font-semibold">{typeInfo.label}</span>
+                        </div>
+                        <p className="text-title3 font-bold">{cph > 0 ? `€${cph.toFixed(0)}/h` : '—'}</p>
+                        <p className="text-caption1 text-ios-tertiary">{fmtDuration(d.secs)} tracked</p>
                       </div>
                     );
                   })}
@@ -522,56 +370,150 @@ export default function ReportsPage() {
             </div>
           )}
 
-          {/* Evolution */}
-          {tab === 'evolution' && (
+          {/* ── BILLING SECTION ── */}
+          {activeSection === 'billing' && can('canViewBilling') && (
             <div className="space-y-4">
-              <div className="card p-4">
-                <p className="text-headline font-semibold mb-1">Evoluție €/oră</p>
-                <p className="text-footnote text-ios-secondary mb-4">Calculat din suma lunară a proiectelor</p>
-                <LineChart color="#34C759" formatVal={v => `€${v.toFixed(0)}`}
-                  data={monthlyData.map(m => ({ label: m.label, value: parseFloat(m.cph.toFixed(1)) }))} />
+              <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
+                <StatCard label="Collected" value={fmtCurrency(totalPaid)} icon={Euro} color="text-ios-green bg-green-50" />
+                <StatCard label="Expenses" value={fmtCurrency(totalExpenses)} icon={TrendingDown} color="text-ios-red bg-red-50" />
+                <StatCard label="Net profit" value={fmtCurrency(netProfit)} icon={TrendingUp}
+                  color={netProfit >= 0 ? 'text-ios-green bg-green-50' : 'text-ios-red bg-red-50'} />
               </div>
-              <div className="card p-4">
-                <p className="text-headline font-semibold mb-1">Evoluție încasat (€)</p>
-                <p className="text-footnote text-ios-secondary mb-4">Facturi plătite per lună</p>
-                <LineChart color="#FF9500" formatVal={v => `€${v}`}
-                  data={monthlyData.map(m => ({ label: m.label, value: m.billed }))} />
+
+              {/* Billing by client type */}
+              <div className="grid lg:grid-cols-3 gap-3">
+                {Object.entries(CLIENT_TYPES).map(([typeKey, typeInfo]) => {
+                  const typePaid = filteredBilling.filter(b => (b.clients?.client_type || 'direct') === typeKey).reduce((a, b) => a + (b.amount || 0), 0);
+                  const count = filteredBilling.filter(b => (b.clients?.client_type || 'direct') === typeKey).length;
+                  return (
+                    <div key={typeKey} className="card p-4">
+                      <div className="flex items-center gap-2 mb-2">
+                        <div className="w-2.5 h-2.5 rounded-full" style={{ background: typeInfo.color }} />
+                        <span className="text-footnote font-semibold text-ios-secondary">{typeInfo.label}</span>
+                      </div>
+                      <p className="text-title3 font-bold text-ios-green">{fmtCurrency(typePaid)}</p>
+                      <p className="text-caption1 text-ios-tertiary">{count} invoices paid</p>
+                    </div>
+                  );
+                })}
               </div>
-              <div className="card p-4">
-                <p className="text-headline font-semibold mb-1">Evoluție ore lucrate</p>
-                <LineChart color="#007AFF" formatVal={v => `${v}h`}
-                  data={monthlyData.map(m => ({ label: m.label, value: parseFloat(m.hours.toFixed(1)) }))} />
+
+              {/* Invoices table */}
+              <div className="card overflow-hidden">
+                <div className="px-4 py-3 border-b border-ios-separator/30">
+                  <p className="text-headline font-semibold">Paid invoices in period</p>
+                </div>
+                {filteredBilling.length === 0 ? (
+                  <p className="text-center text-ios-tertiary text-subhead py-8">No paid invoices in this period</p>
+                ) : (
+                  <table className="w-full text-left">
+                    <thead className="bg-ios-bg">
+                      <tr>
+                        {['Client','Type','Month','Amount'].map(h => (
+                          <th key={h} className="px-4 py-3 text-caption1 font-semibold text-ios-secondary uppercase tracking-wide">{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredBilling.map(b => (
+                        <tr key={b.id} className="border-t border-ios-separator/20 hover:bg-ios-bg">
+                          <td className="px-4 py-3 text-subhead font-medium">{b.clients?.name || '—'}</td>
+                          <td className="px-4 py-3">
+                            {b.clients?.client_type && (
+                              <span className="text-caption2 font-semibold px-2 py-0.5 rounded-full text-white"
+                                style={{ background: CLIENT_TYPES[b.clients.client_type]?.color || '#888' }}>
+                                {CLIENT_TYPES[b.clients.client_type]?.label || b.clients.client_type}
+                              </span>
+                            )}
+                          </td>
+                          <td className="px-4 py-3 text-footnote text-ios-secondary">{MONTHS_SHORT[(b.month||1)-1]} {b.year}</td>
+                          <td className="px-4 py-3 text-subhead font-bold text-ios-green">{fmtCurrency(b.amount)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
               </div>
             </div>
           )}
 
-          {/* Monthly */}
-          {tab === 'monthly' && (
-            <div className="card overflow-hidden">
-              <div className="px-4 py-3 border-b border-ios-separator/50">
-                <p className="text-headline font-semibold">Detalii lunare</p>
-              </div>
-              <div className="overflow-x-auto">
-                <table className="w-full text-left">
-                  <thead className="bg-ios-bg">
-                    <tr>
-                      {['Lună','Ore lucrate','Încasat (€)','€/oră','Înregistrări'].map(h => (
-                        <th key={h} className="px-4 py-3 text-caption1 font-semibold text-ios-secondary uppercase tracking-wide whitespace-nowrap">{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {monthlyData.map((m, i) => (
-                      <tr key={i} className="border-t border-ios-separator/20 hover:bg-ios-bg">
-                        <td className="px-4 py-3 text-subhead font-bold">{m.label}</td>
-                        <td className="px-4 py-3 text-subhead">{m.hours > 0 ? `${m.hours.toFixed(1)}h` : <span className="text-ios-tertiary">—</span>}</td>
-                        <td className="px-4 py-3 text-subhead font-bold text-ios-green">{m.billed > 0 ? fmtCurrency(m.billed) : <span className="text-ios-tertiary font-normal">—</span>}</td>
-                        <td className="px-4 py-3">{m.cph > 0 ? <span className="badge badge-green">€{m.cph.toFixed(0)}/h</span> : <span className="text-ios-tertiary text-footnote">—</span>}</td>
-                        <td className="px-4 py-3 text-footnote text-ios-secondary">{m.entryCount}</td>
+          {/* ── MONTHLY SECTION ── */}
+          {activeSection === 'monthly' && (
+            <div className="space-y-4">
+              <div className="card overflow-hidden">
+                <div className="px-4 py-3 border-b border-ios-separator/30">
+                  <p className="text-headline font-semibold">Last 6 months overview</p>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left">
+                    <thead className="bg-ios-bg">
+                      <tr>
+                        {['Month','Hours','Collected','Expenses','Net','€/hour'].map(h => (
+                          <th key={h} className="px-4 py-3 text-caption1 font-semibold text-ios-secondary uppercase tracking-wide whitespace-nowrap">{h}</th>
+                        ))}
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {monthlyData.map((m, i) => {
+                        const net = m.paid - m.exp;
+                        return (
+                          <tr key={i} className="border-t border-ios-separator/20 hover:bg-ios-bg">
+                            <td className="px-4 py-3 text-subhead font-bold">{m.label} {m.year !== now.getFullYear() ? m.year : ''}</td>
+                            <td className="px-4 py-3 text-subhead">{m.secs > 0 ? fmtDuration(m.secs) : <span className="text-ios-tertiary">—</span>}</td>
+                            <td className="px-4 py-3 text-subhead font-semibold text-ios-green">{m.paid > 0 ? fmtCurrency(m.paid) : <span className="text-ios-tertiary font-normal">—</span>}</td>
+                            <td className="px-4 py-3 text-subhead text-ios-red">{m.exp > 0 ? fmtCurrency(m.exp) : <span className="text-ios-tertiary">—</span>}</td>
+                            <td className="px-4 py-3">
+                              {(m.paid > 0 || m.exp > 0) ? (
+                                <span className={`text-subhead font-bold ${net >= 0 ? 'text-ios-green' : 'text-ios-red'}`}>{fmtCurrency(net)}</span>
+                              ) : <span className="text-ios-tertiary">—</span>}
+                            </td>
+                            <td className="px-4 py-3">
+                              {m.cph > 0 ? (
+                                <span className={`badge ${m.cph >= 80 ? 'badge-green' : m.cph >= 40 ? 'badge-orange' : 'badge-red'}`}>€{m.cph.toFixed(0)}/h</span>
+                              ) : <span className="text-ios-tertiary text-footnote">—</span>}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* Visual bars */}
+              <div className="grid lg:grid-cols-2 gap-4">
+                <div className="card p-4">
+                  <p className="text-headline font-semibold mb-4">Hours per month</p>
+                  <div className="flex items-end gap-2 h-28">
+                    {monthlyData.map((m, i) => {
+                      const max = Math.max(...monthlyData.map(d => d.secs), 1);
+                      const h = Math.max((m.secs / max) * 96, m.secs > 0 ? 4 : 0);
+                      return (
+                        <div key={i} className="flex-1 flex flex-col items-center gap-1">
+                          <div className="w-full bg-blue-100 rounded-t-ios transition-all" style={{ height: h }} title={fmtDuration(m.secs)} />
+                          <span className="text-[9px] text-ios-tertiary">{m.label}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+                {can('canViewBilling') && (
+                  <div className="card p-4">
+                    <p className="text-headline font-semibold mb-4">Revenue per month</p>
+                    <div className="flex items-end gap-2 h-28">
+                      {monthlyData.map((m, i) => {
+                        const max = Math.max(...monthlyData.map(d => d.paid), 1);
+                        const h = Math.max((m.paid / max) * 96, m.paid > 0 ? 4 : 0);
+                        return (
+                          <div key={i} className="flex-1 flex flex-col items-center gap-1">
+                            <div className="w-full bg-green-100 rounded-t-ios transition-all" style={{ height: h }} title={fmtCurrency(m.paid)} />
+                            <span className="text-[9px] text-ios-tertiary">{m.label}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           )}
