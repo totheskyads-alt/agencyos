@@ -479,7 +479,7 @@ function TaskDetail({ task, members, boardColumns, projects, labels: allLabels, 
 }
 
 // ─── Col Header ───────────────────────────────────────────────────────────────
-function ColHeader({ col, onRename, onDelete, onAdd }) {
+function ColHeader({ col, onRename, onDelete, onAdd, onDragStart, onDragEnd }) {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
   useEffect(() => {
@@ -488,12 +488,13 @@ function ColHeader({ col, onRename, onDelete, onAdd }) {
     return () => document.removeEventListener('mousedown', h);
   }, []);
   return (
-    <div className="flex items-center justify-between mb-3" ref={ref}>
+    <div className="flex items-center justify-between mb-3 cursor-grab active:cursor-grabbing" ref={ref}
+      draggable onDragStart={onDragStart} onDragEnd={onDragEnd}>
       <div className="flex items-center gap-2">
-        <div className="w-2.5 h-2.5 rounded-full" style={{ background: col.color }} />
-        <span className="text-footnote font-bold text-ios-primary">{col.name}</span>
+        <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: col.color }} />
+        <span className="text-footnote font-bold text-ios-primary select-none">{col.name}</span>
       </div>
-      <div className="flex items-center gap-1">
+      <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
         <button onClick={() => onAdd(col.id)} className="p-1 rounded hover:bg-ios-fill text-ios-tertiary hover:text-ios-blue"><Plus className="w-3.5 h-3.5" /></button>
         <div className="relative">
           <button onClick={() => setOpen(!open)} className="p-1 rounded hover:bg-ios-fill text-ios-tertiary"><MoreHorizontal className="w-3.5 h-3.5" /></button>
@@ -576,6 +577,8 @@ export default function TasksPage() {
   const [search, setSearch] = useState('');
   const [collapsed, setCollapsed] = useState({});
   const [dragOver, setDragOver] = useState(null);
+  const [dragCol, setDragCol] = useState(null);
+  const [dragOverCol, setDragOverCol] = useState(null);
   const [taskModal, setTaskModal] = useState(null);
   const [newColModal, setNewColModal] = useState(false);
   const [newColName, setNewColName] = useState('');
@@ -661,6 +664,21 @@ export default function TasksPage() {
     if (!confirm(`Delete column "${col.name}"? Tasks in it will remain without a column.`)) return;
     await supabase.from('task_columns').delete().eq('id', col.id);
     setBoardColumns(p => p.filter(c => c.id !== col.id));
+  }
+
+  async function reorderColumns(fromId, toId) {
+    if (fromId === toId) return;
+    const cols = [...boardColumns];
+    const fromIdx = cols.findIndex(c => c.id === fromId);
+    const toIdx = cols.findIndex(c => c.id === toId);
+    if (fromIdx === -1 || toIdx === -1) return;
+    const [moved] = cols.splice(fromIdx, 1);
+    cols.splice(toIdx, 0, moved);
+    // Update positions
+    const updated = cols.map((c, i) => ({ ...c, position: i }));
+    setBoardColumns(updated);
+    // Save to DB
+    await Promise.all(updated.map(c => supabase.from('task_columns').update({ position: c.position }).eq('id', c.id)));
   }
 
   async function handleDrop(e, colId) {
@@ -871,14 +889,16 @@ export default function TasksPage() {
             const isDragTarget = dragOver===col.id;
             return (
               <div key={col.id}
-                className={`shrink-0 w-64 rounded-ios-lg p-3 transition-all ${isDragTarget ? 'bg-blue-50 ring-2 ring-ios-blue' : 'bg-ios-bg'}`}
-                onDragOver={e => { e.preventDefault(); setDragOver(col.id); }}
-                onDragLeave={() => setDragOver(null)}
-                onDrop={e => handleDrop(e, col.id)}>
+                className={`shrink-0 w-64 rounded-ios-lg p-3 transition-all ${isDragTarget ? 'bg-blue-50 ring-2 ring-ios-blue' : dragOverCol === col.id && dragCol !== col.id ? 'ring-2 ring-ios-orange ring-dashed' : 'bg-ios-bg'}`}
+                onDragOver={e => { e.preventDefault(); if (dragCol) setDragOverCol(col.id); else setDragOver(col.id); }}
+                onDragLeave={() => { setDragOver(null); setDragOverCol(null); }}
+                onDrop={e => { if (dragCol) { reorderColumns(dragCol, col.id); setDragCol(null); setDragOverCol(null); } else { handleDrop(e, col.id); } }}>
                 <ColHeader col={col}
                   onRename={() => { setEditColModal(col); setEditColName(col.name); }}
                   onDelete={() => deleteColumn(col)}
-                  onAdd={colId => setTaskModal({ column_id: colId, project_id: filterProject||'' })} />
+                  onAdd={colId => setTaskModal({ column_id: colId, project_id: filterProject||'' })}
+                  onDragStart={() => setDragCol(col.id)}
+                  onDragEnd={() => { setDragCol(null); setDragOverCol(null); }} />
                 <div className="space-y-2">
                   {colTasks.map(task => {
                     const pri = PRIORITY[task.priority];
