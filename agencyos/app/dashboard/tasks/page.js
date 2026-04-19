@@ -903,6 +903,11 @@ export default function TasksPage() {
                             {isDone && <Check className="w-2.5 h-2.5 text-white" strokeWidth={3}/>}
                           </button>
                           <p className={`text-footnote font-semibold leading-snug flex-1 ${isDone ? 'line-through text-ios-tertiary' : 'text-ios-primary'}`}>{task.title}</p>
+                          <button onClick={e => { e.stopPropagation(); quickArchive(task.id); }}
+                            className="opacity-0 group-hover:opacity-100 p-0.5 rounded text-ios-tertiary hover:text-ios-orange transition-all shrink-0"
+                            title="Archive">
+                            <Archive className="w-3 h-3" />
+                          </button>
                         </div>
                         {task.projects?.name && (
                           <div className="flex items-center gap-1 mb-1.5">
