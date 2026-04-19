@@ -2,20 +2,26 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import Modal from '@/components/Modal';
-import { fmtCurrency, fmtDuration, getNeglectLabel } from '@/lib/utils';
-import { Plus, Search, ChevronRight, Mail, Phone, Building2, TrendingUp } from 'lucide-react';
+import { fmtCurrency, fmtDuration } from '@/lib/utils';
+import { Plus, Search, ChevronRight, Mail, Phone } from 'lucide-react';
 
-const empty = { name: '', company: '', email: '', phone: '', notes: '', monthly_budget: '', hourly_rate: '', type: 'direct' };
+const CLIENT_TYPES = {
+  direct:      { label: 'Direct',      color: 'badge-blue',   bg: 'bg-blue-50 text-ios-blue' },
+  whitelabel:  { label: 'White-label', color: 'badge-purple', bg: 'bg-purple-50 text-ios-purple' },
+  colaborator: { label: 'Colaborator', color: 'badge-orange', bg: 'bg-orange-50 text-ios-orange' },
+};
+
+const empty = { name: '', company: '', email: '', phone: '', notes: '', monthly_budget: '', client_type: 'direct' };
 
 export default function ClientsPage() {
   const [clients, setClients] = useState([]);
-  const [clientStats, setClientStats] = useState({});
   const [search, setSearch] = useState('');
+  const [filterType, setFilterType] = useState('');
   const [modal, setModal] = useState(false);
   const [selected, setSelected] = useState(null);
   const [form, setForm] = useState(empty);
   const [loading, setLoading] = useState(false);
-  const [view, setView] = useState('grid');
+  const [clientStats, setClientStats] = useState({});
 
   useEffect(() => { load(); }, []);
 
@@ -23,20 +29,17 @@ export default function ClientsPage() {
     const { data } = await supabase.from('clients').select('*').order('name');
     setClients(data || []);
 
-    // Load time stats per client
     const monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString();
     const { data: entries } = await supabase.from('time_entries')
-      .select('project_id, duration_seconds, created_at, projects(client_id)')
+      .select('duration_seconds, created_at, projects(client_id)')
       .not('end_time', 'is', null).gte('created_at', monthStart);
 
     const stats = {};
     (entries || []).forEach(e => {
-      const cid = e.projects?.client_id;
-      if (!cid) return;
+      const cid = e.projects?.client_id; if (!cid) return;
       if (!stats[cid]) stats[cid] = { seconds: 0, lastActivity: null };
       stats[cid].seconds += (e.duration_seconds || 0);
-      if (!stats[cid].lastActivity || e.created_at > stats[cid].lastActivity)
-        stats[cid].lastActivity = e.created_at;
+      if (!stats[cid].lastActivity || e.created_at > stats[cid].lastActivity) stats[cid].lastActivity = e.created_at;
     });
     setClientStats(stats);
   }
@@ -44,39 +47,33 @@ export default function ClientsPage() {
   function openAdd() { setForm(empty); setSelected(null); setModal(true); }
   function openEdit(c) {
     setForm({ name: c.name, company: c.company || '', email: c.email || '', phone: c.phone || '',
-      notes: c.notes || '', monthly_budget: c.monthly_budget || '', hourly_rate: c.hourly_rate || '', type: c.type || 'direct' });
+      notes: c.notes || '', monthly_budget: c.monthly_budget || '', client_type: c.client_type || 'direct' });
     setSelected(c); setModal(true);
   }
 
   async function save() {
     setLoading(true);
-    const payload = {
-      ...form,
-      monthly_budget: form.monthly_budget ? parseFloat(form.monthly_budget) : null,
-      hourly_rate: form.hourly_rate ? parseFloat(form.hourly_rate) : null,
-    };
+    const payload = { ...form, monthly_budget: form.monthly_budget ? parseFloat(form.monthly_budget) : null };
     if (selected) await supabase.from('clients').update(payload).eq('id', selected.id);
     else await supabase.from('clients').insert(payload);
     setModal(false); setLoading(false); load();
   }
 
   async function del(id) {
-    if (!confirm('Ștergi clientul? Proiectele asociate vor rămâne fără client.')) return;
+    if (!confirm('Ștergi clientul?')) return;
     await supabase.from('clients').delete().eq('id', id);
-    load();
+    setModal(false); load();
   }
 
-  const filtered = clients.filter(c =>
-    c.name?.toLowerCase().includes(search.toLowerCase()) ||
-    c.company?.toLowerCase().includes(search.toLowerCase())
-  );
+  const filtered = clients.filter(c => {
+    if (filterType && (c.client_type || 'direct') !== filterType) return false;
+    if (search && !c.name?.toLowerCase().includes(search.toLowerCase()) && !c.company?.toLowerCase().includes(search.toLowerCase())) return false;
+    return true;
+  });
 
-  const typeColors = {
-    direct:     'badge-blue',
-    whitelabel: 'badge-purple',
-    partner:    'badge-green',
-  };
-  const typeLabels = { direct: 'Direct', whitelabel: 'White-label', partner: 'Partener' };
+  // Group by type
+  const byType = { direct: [], whitelabel: [], colaborator: [] };
+  filtered.forEach(c => { const t = c.client_type || 'direct'; if (byType[t]) byType[t].push(c); });
 
   return (
     <div className="space-y-4">
@@ -90,64 +87,70 @@ export default function ClientsPage() {
         </button>
       </div>
 
-      {/* Search */}
-      <div className="relative">
-        <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-ios-tertiary" />
-        <input className="input pl-10" placeholder="Caută clienți..." value={search} onChange={e => setSearch(e.target.value)} />
+      <div className="flex gap-2">
+        <div className="relative flex-1">
+          <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-ios-tertiary" />
+          <input className="input pl-10" placeholder="Caută clienți..." value={search} onChange={e => setSearch(e.target.value)} />
+        </div>
+        <div className="flex gap-1.5">
+          {[['', 'Toți'], ...Object.entries(CLIENT_TYPES).map(([k,v]) => [k, v.label])].map(([k,v]) => (
+            <button key={k} onClick={() => setFilterType(k)}
+              className={`px-3 py-2 rounded-ios text-footnote font-semibold transition-all whitespace-nowrap ${filterType === k ? 'bg-ios-blue text-white' : 'bg-ios-fill text-ios-secondary'}`}>
+              {v}
+            </button>
+          ))}
+        </div>
       </div>
 
-      {filtered.length === 0 ? (
-        <div className="card p-12 text-center">
-          <p className="text-headline font-semibold text-ios-secondary mb-1">Niciun client</p>
-          <p className="text-subhead text-ios-tertiary mb-4">Adaugă primul tău client</p>
-          <button onClick={openAdd} className="btn-primary">Adaugă client</button>
-        </div>
-      ) : (
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {filtered.map(c => {
-            const st = clientStats[c.id] || {};
-            const neglect = getNeglectLabel(st.lastActivity ? 0 : 100);
-            const profitability = c.monthly_budget && c.hourly_rate && st.seconds
-              ? Math.round(((c.monthly_budget - (st.seconds / 3600) * c.hourly_rate) / c.monthly_budget) * 100)
-              : null;
-
-            return (
-              <div key={c.id} className="card hover:shadow-ios-lg transition-shadow cursor-pointer" onClick={() => openEdit(c)}>
-                <div className="p-4">
-                  <div className="flex items-start justify-between mb-3">
-                    <div className="flex items-center gap-3">
-                      <div className="w-11 h-11 bg-orange-50 rounded-ios flex items-center justify-center text-ios-orange text-headline font-bold">
-                        {c.name[0]?.toUpperCase()}
+      {/* Grouped by type */}
+      {Object.entries(CLIENT_TYPES).map(([typeKey, typeInfo]) => {
+        const items = filterType ? (filterType === typeKey ? filtered : []) : byType[typeKey];
+        if (items.length === 0) return null;
+        return (
+          <div key={typeKey}>
+            <div className="flex items-center gap-2 mb-2 px-1">
+              <span className={`badge ${typeInfo.color}`}>{typeInfo.label}</span>
+              <span className="text-caption1 text-ios-tertiary">{items.length}</span>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {items.map(c => {
+                const st = clientStats[c.id] || {};
+                return (
+                  <div key={c.id} className="card p-4 hover:shadow-ios-lg transition-shadow cursor-pointer" onClick={() => openEdit(c)}>
+                    <div className="flex items-start justify-between mb-3">
+                      <div className="flex items-center gap-3">
+                        <div className={`w-10 h-10 ${typeInfo.bg} rounded-ios flex items-center justify-center text-headline font-bold`}>
+                          {c.name[0]?.toUpperCase()}
+                        </div>
+                        <div>
+                          <p className="text-subhead font-semibold text-ios-primary">{c.name}</p>
+                          {c.company && <p className="text-footnote text-ios-secondary">{c.company}</p>}
+                        </div>
                       </div>
-                      <div>
-                        <p className="text-subhead font-semibold text-ios-primary">{c.name}</p>
-                        {c.company && <p className="text-footnote text-ios-secondary">{c.company}</p>}
-                      </div>
+                      <ChevronRight className="w-4 h-4 text-ios-tertiary shrink-0" />
                     </div>
-                    <ChevronRight className="w-4 h-4 text-ios-tertiary shrink-0 mt-0.5" />
-                  </div>
-
-                  <div className="flex flex-wrap gap-1.5 mb-3">
-                    <span className={typeColors[c.type] || 'badge-gray'}>{typeLabels[c.type] || c.type}</span>
-                    {st.seconds > 0 && <span className="badge-blue">{fmtDuration(st.seconds)} luna asta</span>}
-                    {profitability !== null && (
-                      <span className={profitability >= 50 ? 'badge-green' : profitability >= 20 ? 'badge-orange' : 'badge-red'}>
-                        {profitability}% profit
-                      </span>
+                    <div className="flex flex-wrap gap-2">
+                      {st.seconds > 0 && <span className="badge badge-blue">{fmtDuration(st.seconds)} luna asta</span>}
+                      {c.monthly_budget && <span className="badge badge-green">{fmtCurrency(c.monthly_budget)}/lună</span>}
+                    </div>
+                    {(c.email || c.phone) && (
+                      <div className="mt-2 pt-2 border-t border-ios-separator/50 flex gap-3">
+                        {c.email && <div className="flex items-center gap-1 text-caption1 text-ios-secondary"><Mail className="w-3 h-3" />{c.email}</div>}
+                        {c.phone && <div className="flex items-center gap-1 text-caption1 text-ios-secondary"><Phone className="w-3 h-3" />{c.phone}</div>}
+                      </div>
                     )}
                   </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })}
 
-                  <div className="border-t border-ios-separator/50 pt-3 flex items-center justify-between">
-                    {c.monthly_budget
-                      ? <span className="text-footnote text-ios-secondary">Budget: <span className="font-semibold text-ios-primary">{fmtCurrency(c.monthly_budget)}/lună</span></span>
-                      : <span className="text-footnote text-ios-tertiary">Fără budget setat</span>
-                    }
-                    {c.email && <Mail className="w-3.5 h-3.5 text-ios-tertiary" />}
-                  </div>
-                </div>
-              </div>
-            );
-          })}
+      {filtered.length === 0 && (
+        <div className="card p-12 text-center">
+          <p className="text-headline font-semibold text-ios-secondary mb-4">Niciun client</p>
+          <button onClick={openAdd} className="btn-primary">Adaugă client</button>
         </div>
       )}
 
@@ -157,50 +160,24 @@ export default function ClientsPage() {
             <div>
               <label className="input-label">Tip client</label>
               <div className="flex gap-2">
-                {Object.entries(typeLabels).map(([k, v]) => (
-                  <button key={k} onClick={() => setForm({ ...form, type: k })}
-                    className={`flex-1 py-2 rounded-ios text-footnote font-semibold transition-all ${
-                      form.type === k ? 'bg-ios-blue text-white' : 'bg-ios-fill text-ios-secondary hover:bg-ios-fill2'
-                    }`}>{v}</button>
+                {Object.entries(CLIENT_TYPES).map(([k, v]) => (
+                  <button key={k} onClick={() => setForm({ ...form, client_type: k })}
+                    className={`flex-1 py-2 rounded-ios text-footnote font-semibold transition-all ${form.client_type === k ? 'bg-ios-blue text-white' : 'bg-ios-fill text-ios-secondary'}`}>
+                    {v.label}
+                  </button>
                 ))}
               </div>
             </div>
-
             <div className="grid grid-cols-2 gap-3">
-              <div className="col-span-2">
-                <label className="input-label">Nume client *</label>
-                <input className="input" placeholder="Numele clientului" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} />
-              </div>
-              <div className="col-span-2">
-                <label className="input-label">Companie</label>
-                <input className="input" placeholder="Numele companiei" value={form.company} onChange={e => setForm({ ...form, company: e.target.value })} />
-              </div>
-              <div>
-                <label className="input-label">Email</label>
-                <input className="input" type="email" placeholder="email@client.com" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} />
-              </div>
-              <div>
-                <label className="input-label">Telefon</label>
-                <input className="input" placeholder="+40 ..." value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} />
-              </div>
-              <div>
-                <label className="input-label">Budget lunar (€)</label>
-                <input className="input" type="number" placeholder="1000" value={form.monthly_budget} onChange={e => setForm({ ...form, monthly_budget: e.target.value })} />
-              </div>
-              <div>
-                <label className="input-label">Cost/oră intern (€)</label>
-                <input className="input" type="number" placeholder="25" value={form.hourly_rate} onChange={e => setForm({ ...form, hourly_rate: e.target.value })} />
-              </div>
-              <div className="col-span-2">
-                <label className="input-label">Note</label>
-                <textarea className="input" rows={3} placeholder="Informații importante..." value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} />
-              </div>
+              <div className="col-span-2"><label className="input-label">Nume *</label><input className="input" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} /></div>
+              <div className="col-span-2"><label className="input-label">Companie</label><input className="input" value={form.company} onChange={e => setForm({ ...form, company: e.target.value })} /></div>
+              <div><label className="input-label">Email</label><input className="input" type="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} /></div>
+              <div><label className="input-label">Telefon</label><input className="input" value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} /></div>
+              <div className="col-span-2"><label className="input-label">Budget lunar (€)</label><input className="input" type="number" placeholder="1000" value={form.monthly_budget} onChange={e => setForm({ ...form, monthly_budget: e.target.value })} /></div>
+              <div className="col-span-2"><label className="input-label">Note</label><textarea className="input" rows={2} value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} /></div>
             </div>
-
             <div className="flex gap-3 pt-2">
-              {selected && (
-                <button className="btn-danger" onClick={() => { del(selected.id); setModal(false); }}>Șterge</button>
-              )}
+              {selected && <button className="btn-danger" onClick={() => del(selected.id)}>Șterge</button>}
               <button className="btn-secondary flex-1" onClick={() => setModal(false)}>Anulează</button>
               <button className="btn-primary flex-1" onClick={save} disabled={loading || !form.name}>
                 {loading ? 'Se salvează...' : 'Salvează'}
