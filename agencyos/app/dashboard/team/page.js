@@ -3,7 +3,7 @@ import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useRole } from '@/lib/useRole';
 import { fmtDuration } from '@/lib/utils';
-import { Crown, Shield, User, Info, X } from 'lucide-react';
+import { Crown, Shield, User, Info, Trash2, AlertCircle } from 'lucide-react';
 
 const ROLES = {
   admin: {
@@ -31,7 +31,8 @@ export default function TeamPage() {
   const [stats, setStats] = useState({});
   const [currentUserId, setCurrentUserId] = useState(null);
   const [showPermissions, setShowPermissions] = useState(false);
-  const { isAdmin, loading } = useRole();
+  const [confirmDelete, setConfirmDelete] = useState(null);
+  const { isAdmin } = useRole();
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data: { user } }) => {
@@ -61,6 +62,18 @@ export default function TeamPage() {
     setMembers(prev => prev.map(m => m.id === memberId ? { ...m, role } : m));
   }
 
+  async function deleteUser(memberId) {
+    // Delete all related data first
+    await Promise.all([
+      supabase.from('time_entries').delete().eq('user_id', memberId),
+      supabase.from('task_comments').delete().eq('user_id', memberId),
+    ]);
+    // Delete profile (auth user deletion requires admin API, so we just clear profile)
+    await supabase.from('profiles').delete().eq('id', memberId);
+    setMembers(prev => prev.filter(m => m.id !== memberId));
+    setConfirmDelete(null);
+  }
+
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between">
@@ -74,7 +87,6 @@ export default function TeamPage() {
         </button>
       </div>
 
-      {/* Permissions panel */}
       {showPermissions && (
         <div className="grid lg:grid-cols-3 gap-3">
           {Object.entries(ROLES).map(([key, role]) => {
@@ -88,14 +100,12 @@ export default function TeamPage() {
                 <ul className="space-y-1.5">
                   {role.permissions.map((p, i) => (
                     <li key={i} className="flex items-start gap-1.5 text-caption1">
-                      <span className="text-ios-green mt-0.5 shrink-0 font-bold">✓</span>
-                      <span>{p}</span>
+                      <span className="text-ios-green shrink-0 font-bold">✓</span><span>{p}</span>
                     </li>
                   ))}
                   {role.denied.map((p, i) => (
                     <li key={i} className="flex items-start gap-1.5 text-caption1 opacity-60">
-                      <span className="text-ios-red mt-0.5 shrink-0 font-bold">✗</span>
-                      <span>{p}</span>
+                      <span className="text-ios-red shrink-0 font-bold">✗</span><span>{p}</span>
                     </li>
                   ))}
                 </ul>
@@ -105,7 +115,30 @@ export default function TeamPage() {
         </div>
       )}
 
-      {/* Members list */}
+      {/* Confirm delete dialog */}
+      {confirmDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm px-4">
+          <div className="bg-white rounded-ios-lg p-6 max-w-sm w-full shadow-ios-modal">
+            <div className="flex items-center gap-3 mb-3">
+              <div className="w-10 h-10 bg-red-100 rounded-full flex items-center justify-center">
+                <AlertCircle className="w-5 h-5 text-ios-red" />
+              </div>
+              <div>
+                <p className="text-headline font-bold">Delete member?</p>
+                <p className="text-footnote text-ios-secondary">{confirmDelete.full_name || confirmDelete.email}</p>
+              </div>
+            </div>
+            <p className="text-subhead text-ios-secondary mb-5">
+              This will remove their profile and time entries. This cannot be undone.
+            </p>
+            <div className="flex gap-3">
+              <button className="btn-secondary flex-1" onClick={() => setConfirmDelete(null)}>Cancel</button>
+              <button className="btn-danger flex-1" onClick={() => deleteUser(confirmDelete.id)}>Delete</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="space-y-3">
         {members.map(m => {
           const isMe = m.id === currentUserId;
@@ -131,24 +164,30 @@ export default function TeamPage() {
                   </div>
                   <p className="text-footnote text-ios-secondary truncate">{m.email}</p>
                   <div className="flex gap-4 mt-1">
-                    {st.week > 0 && <span className="text-caption1 text-ios-secondary">This week: <span className="font-semibold text-ios-primary">{fmtDuration(st.week)}</span></span>}
-                    {st.month > 0 && <span className="text-caption1 text-ios-secondary">This month: <span className="font-semibold text-ios-primary">{fmtDuration(st.month)}</span></span>}
+                    {st.week > 0 && <span className="text-caption1 text-ios-secondary">Week: <span className="font-semibold text-ios-primary">{fmtDuration(st.week)}</span></span>}
+                    {st.month > 0 && <span className="text-caption1 text-ios-secondary">Month: <span className="font-semibold text-ios-primary">{fmtDuration(st.month)}</span></span>}
                   </div>
                 </div>
+                {/* Delete button — admin only, not self */}
+                {isAdmin && !isMe && (
+                  <button onClick={() => setConfirmDelete(m)}
+                    className="p-2 rounded-ios hover:bg-red-50 text-ios-tertiary hover:text-ios-red transition-colors shrink-0"
+                    title="Remove member">
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                )}
               </div>
 
-              {/* Role changer — admin only, not self */}
               {isAdmin && !isMe && (
                 <div className="mt-3 pt-3 border-t border-ios-separator/30">
-                  <p className="text-caption1 text-ios-tertiary mb-2 uppercase tracking-wide font-semibold">Change Role</p>
+                  <p className="text-caption1 text-ios-tertiary mb-2 uppercase tracking-wide font-semibold">Role</p>
                   <div className="flex gap-2">
                     {Object.entries(ROLES).map(([key, r]) => {
                       const RIcon = r.icon;
-                      const isSelected = roleKey === key;
                       return (
                         <button key={key} onClick={() => changeRole(m.id, key)}
                           className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-ios text-caption1 font-semibold transition-all border ${
-                            isSelected ? `${r.color} border-current` : 'bg-ios-fill text-ios-secondary border-transparent hover:bg-ios-fill2'
+                            roleKey === key ? `${r.color} border-current` : 'bg-ios-fill text-ios-secondary border-transparent hover:bg-ios-fill2'
                           }`}>
                           <RIcon className="w-3 h-3" />{r.label}
                         </button>
@@ -166,7 +205,7 @@ export default function TeamPage() {
         <p className="text-subhead font-semibold mb-1">How to add teammates</p>
         <p className="text-footnote text-ios-secondary">
           Share the app URL and ask them to sign up. They'll appear here automatically with <strong>Operator</strong> role.
-          {isAdmin && ' As Admin, you can change their role anytime from this page.'}
+          {isAdmin && ' As Admin, you can change their role or remove them anytime.'}
         </p>
       </div>
     </div>
