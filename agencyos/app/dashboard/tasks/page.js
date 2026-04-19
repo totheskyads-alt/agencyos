@@ -3,6 +3,7 @@ import { useState, useEffect, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
 import Modal from '@/components/Modal';
 import { fmtDate, getElapsed, fmtClock } from '@/lib/utils';
+import { useRole } from '@/lib/useRole';
 import { useTimer } from '@/lib/timerContext';
 import {
   Plus, Search, ChevronDown, ArrowLeft, MessageSquare,
@@ -31,6 +32,27 @@ const VIEW_KEY = 'agencyos_tasks_view';
 // ─── Download File Helper ─────────────────────────────────────────────────────
 async function downloadFile(url, filename) {
   try {
+    // Try to get Supabase storage signed URL for download
+    // Extract path from URL: everything after /storage/v1/object/public/task-files/
+    const marker = '/object/public/task-files/';
+    const pathIdx = url.indexOf(marker);
+    if (pathIdx !== -1) {
+      const filePath = url.substring(pathIdx + marker.length);
+      const { data } = await import('@/lib/supabase').then(m => m.supabase.storage.from('task-files').createSignedUrl(filePath, 60));
+      if (data?.signedUrl) {
+        const res = await fetch(data.signedUrl);
+        const blob = await res.blob();
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = filename || 'file';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(a.href);
+        return;
+      }
+    }
+    // Fallback: direct fetch
     const res = await fetch(url);
     const blob = await res.blob();
     const a = document.createElement('a');
@@ -40,7 +62,8 @@ async function downloadFile(url, filename) {
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(a.href);
-  } catch {
+  } catch (err) {
+    console.error('Download error:', err);
     window.open(url, '_blank');
   }
 }
@@ -609,6 +632,7 @@ export default function TasksPage() {
   const memberRef = useRef(null);
 
   const { activeTimer, elapsed, startTimer, stopTimer } = useTimer();
+  const { isManager, profile: userProfile } = useRole();
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data: { user } }) => { setCurrentUser(user); loadTimer(); });
@@ -639,10 +663,19 @@ export default function TasksPage() {
   }
 
   async function loadTasks() {
-    const [{ data: active }, { data: archived }] = await Promise.all([
-      supabase.from('tasks').select('*, profiles(full_name,email), projects(id,name,color,clients(name))').eq('is_archived',false).order('position'),
-      supabase.from('tasks').select('*, profiles(full_name,email), projects(id,name,color)').eq('is_archived',true).order('archived_at',{ascending:false}).limit(50),
-    ]);
+    const { data: currentProfile } = await supabase.from('profiles').select('role').eq('id', (await supabase.auth.getUser()).data.user?.id || '').single();
+    const isOperator = currentProfile?.role === 'operator';
+    const currentUid = (await supabase.auth.getUser()).data.user?.id;
+
+    let activeQ = supabase.from('tasks').select('*, profiles(full_name,email), projects(id,name,color,clients(name))').eq('is_archived',false).order('position');
+    let archivedQ = supabase.from('tasks').select('*, profiles(full_name,email), projects(id,name,color)').eq('is_archived',true).order('archived_at',{ascending:false}).limit(50);
+
+    if (isOperator && currentUid) {
+      activeQ = activeQ.eq('assigned_to', currentUid);
+      archivedQ = archivedQ.eq('assigned_to', currentUid);
+    }
+
+    const [{ data: active }, { data: archived }] = await Promise.all([activeQ, archivedQ]);
     const all = [...(active||[]), ...(archived||[])];
     const ids = all.map(t => t.id);
     let cc = {}, tl = {};
