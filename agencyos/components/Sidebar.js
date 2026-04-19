@@ -3,8 +3,9 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { useRole } from '@/lib/useRole';
-import { LayoutDashboard, Timer, Users, FolderOpen, CheckSquare, BarChart3, UsersRound, LogOut, Menu, X, Clock, Receipt } from 'lucide-react';
+import { LayoutDashboard, Timer, Users, FolderOpen, CheckSquare, BarChart3, UsersRound, LogOut, Menu, X, Receipt } from 'lucide-react';
 import { useState } from 'react';
+import Image from 'next/image';
 
 const ALL_NAV = [
   { href: '/dashboard',          icon: LayoutDashboard, label: 'Dashboard',  permission: null },
@@ -24,38 +25,39 @@ export default function Sidebar({ user, profile }) {
   const [open, setOpen] = useState(false);
 
   const nav = ALL_NAV.filter(item => !item.permission || can(item.permission));
-
   const logout = async () => { await supabase.auth.signOut(); router.push('/login'); };
   const initials = (profile?.full_name || user?.email || 'U').split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2);
-  const roleBadge = { admin: 'bg-purple-100 text-ios-purple', manager: 'bg-blue-100 text-ios-blue', operator: 'bg-ios-fill2 text-ios-secondary' };
+  const roleBadge = { admin: 'bg-purple-100 text-purple-700', manager: 'bg-blue-100 text-blue-700', operator: 'bg-gray-100 text-gray-500' };
 
   return (
     <>
-      <div className="lg:hidden fixed top-0 left-0 right-0 z-40 bg-white/80 backdrop-blur-ios border-b border-ios-separator/50 px-4 py-3 flex items-center justify-between">
+      {/* Mobile top bar */}
+      <div className="lg:hidden fixed top-0 left-0 right-0 z-40 bg-white/90 backdrop-blur-ios border-b border-ios-separator/50 px-4 py-3 flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <div className="w-7 h-7 bg-ios-blue rounded-ios-sm flex items-center justify-center">
-            <Clock className="w-4 h-4 text-white" strokeWidth={2.5} />
-          </div>
-          <span className="text-headline font-bold">Agency OS</span>
+          <img src="/logo.jpg" alt="Sky Metrics" className="w-8 h-8 rounded-full object-cover" />
+          <span className="text-headline font-bold text-ios-primary">Sky Metrics</span>
         </div>
         <button onClick={() => setOpen(!open)} className="p-2 rounded-ios hover:bg-ios-fill">
           {open ? <X className="w-5 h-5 text-ios-secondary" /> : <Menu className="w-5 h-5 text-ios-secondary" />}
         </button>
       </div>
+
       {open && <div className="lg:hidden fixed inset-0 bg-black/30 z-30 backdrop-blur-sm" onClick={() => setOpen(false)} />}
+
       <aside className={`fixed left-0 top-0 h-full w-60 bg-white/95 backdrop-blur-ios border-r border-ios-separator/30 z-40 transition-transform duration-300 lg:translate-x-0 ${open ? 'translate-x-0' : '-translate-x-full'}`}>
         <div className="flex flex-col h-full">
+          {/* Logo */}
           <div className="px-5 py-5 border-b border-ios-separator/30">
             <div className="flex items-center gap-3">
-              <div className="w-9 h-9 bg-ios-blue rounded-ios flex items-center justify-center shadow-ios-sm">
-                <Clock className="w-5 h-5 text-white" strokeWidth={2.5} />
-              </div>
+              <img src="/logo.jpg" alt="Sky Metrics" className="w-10 h-10 rounded-full object-cover shadow-ios-sm ring-2 ring-ios-blue/20" />
               <div>
-                <p className="text-headline font-bold text-ios-primary">Agency OS</p>
+                <p className="text-headline font-bold text-ios-primary">Sky Metrics</p>
                 <p className="text-caption1 text-ios-secondary">v2.0</p>
               </div>
             </div>
           </div>
+
+          {/* Nav */}
           <nav className="flex-1 p-3 space-y-0.5 overflow-y-auto">
             {nav.map(({ href, icon: Icon, label }) => {
               const active = pathname === href || (href !== '/dashboard' && pathname.startsWith(href));
@@ -68,6 +70,8 @@ export default function Sidebar({ user, profile }) {
               );
             })}
           </nav>
+
+          {/* User */}
           <div className="p-3 border-t border-ios-separator/30">
             <div className="flex items-center gap-3 px-3 py-2.5 rounded-ios bg-ios-fill mb-1">
               <div className="w-8 h-8 bg-ios-blue rounded-full flex items-center justify-center text-white text-caption1 font-bold shrink-0">{initials}</div>
