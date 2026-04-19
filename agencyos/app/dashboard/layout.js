@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import Sidebar from '@/components/Sidebar';
+import GlobalTimer from '@/components/GlobalTimer';
 
 export default function DashboardLayout({ children }) {
   const router = useRouter();
@@ -26,21 +27,19 @@ export default function DashboardLayout({ children }) {
 
   if (loading) return (
     <div className="flex items-center justify-center min-h-screen bg-ios-bg">
-      <div className="flex flex-col items-center gap-3">
-        <div className="w-8 h-8 border-[3px] border-ios-blue border-t-transparent rounded-full animate-spin" />
-        <p className="text-subhead text-ios-secondary">Se încarcă...</p>
-      </div>
+      <div className="w-8 h-8 border-[3px] border-ios-blue border-t-transparent rounded-full animate-spin" />
     </div>
   );
 
   return (
     <div className="flex min-h-screen bg-ios-bg">
       <Sidebar user={user} profile={profile} />
-      <main className="flex-1 lg:ml-60 pt-16 lg:pt-0 min-h-screen">
+      <main className="flex-1 lg:ml-60 pt-16 lg:pt-0 pb-14 min-h-screen">
         <div className="p-4 lg:p-6 max-w-7xl mx-auto">
           {children}
         </div>
       </main>
+      <GlobalTimer />
     </div>
   );
 }
