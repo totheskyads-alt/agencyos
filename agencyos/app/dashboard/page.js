@@ -3,7 +3,7 @@ import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { fmtDuration } from '@/lib/utils';
 import Link from 'next/link';
-import { Play, Users, FolderOpen, CheckSquare, ArrowRight, Clock } from 'lucide-react';
+import { ArrowRight, Clock } from 'lucide-react';
 
 function greeting() {
   const h = new Date().getHours();
@@ -12,47 +12,37 @@ function greeting() {
   return 'Good evening';
 }
 
-function DonutChart({ data, total }) {
+function DonutChart({ data, total, size = 120 }) {
   if (!data.length || total === 0) return (
-    <div className="flex items-center justify-center h-40 text-ios-tertiary text-footnote">No time tracked today</div>
+    <div className="flex items-center justify-center h-20 text-ios-tertiary text-caption1">No time tracked today</div>
   );
-  const SIZE = 160, CX = 80, CY = 80, R = 60, STROKE = 22;
+  const CX = size/2, CY = size/2, R = size/2 - 14, STROKE = 18;
   const circ = 2 * Math.PI * R;
   let offset = 0;
   const slices = data.map(d => {
-    const pct = d.secs / total;
-    const dash = pct * circ;
-    const gap = circ - dash;
-    const slice = { ...d, dash, gap, offset };
-    offset += dash;
-    return slice;
+    const dash = (d.secs / total) * circ;
+    const sl = { ...d, dash, gap: circ - dash, offset };
+    offset += dash; return sl;
   });
-
   return (
-    <div className="flex items-center gap-6">
-      <svg width={SIZE} height={SIZE} viewBox={`0 0 ${SIZE} ${SIZE}`} style={{ transform: 'rotate(-90deg)' }}>
+    <div className="flex items-center gap-4">
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="shrink-0" style={{ transform:'rotate(-90deg)' }}>
         <circle cx={CX} cy={CY} r={R} fill="none" stroke="#F2F2F7" strokeWidth={STROKE} />
         {slices.map((s, i) => (
-          <circle key={i} cx={CX} cy={CY} r={R} fill="none"
-            stroke={s.color || '#007AFF'} strokeWidth={STROKE}
-            strokeDasharray={`${s.dash} ${s.gap}`}
-            strokeDashoffset={-s.offset}
-            strokeLinecap="butt" />
+          <circle key={i} cx={CX} cy={CY} r={R} fill="none" stroke={s.color || '#007AFF'} strokeWidth={STROKE}
+            strokeDasharray={`${s.dash} ${s.gap}`} strokeDashoffset={-s.offset} />
         ))}
-        <text x={CX} y={CY} textAnchor="middle" dominantBaseline="central"
-          fontSize="13" fontWeight="700" fill="#1C1C1E"
-          style={{ transform: 'rotate(90deg)', transformOrigin: `${CX}px ${CY}px` }}>
-          {fmtDuration(total)}
-        </text>
+        <text x={CX} y={CY} textAnchor="middle" dominantBaseline="central" fontSize="11" fontWeight="700" fill="#1C1C1E"
+          style={{ transform:`rotate(90deg)`, transformOrigin:`${CX}px ${CY}px` }}>{fmtDuration(total)}</text>
       </svg>
-      <div className="flex-1 space-y-2 min-w-0">
-        {slices.map((s, i) => (
+      <div className="flex-1 space-y-1.5 min-w-0">
+        {slices.slice(0, 4).map((s, i) => (
           <div key={i} className="flex items-center justify-between gap-2">
-            <div className="flex items-center gap-2 min-w-0">
-              <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: s.color }} />
-              <span className="text-footnote font-medium text-ios-primary truncate">{s.name}</span>
+            <div className="flex items-center gap-1.5 min-w-0">
+              <div className="w-2 h-2 rounded-full shrink-0" style={{ background: s.color }} />
+              <span className="text-caption1 font-medium text-ios-primary truncate">{s.name}</span>
             </div>
-            <span className="text-caption1 text-ios-secondary font-semibold shrink-0">{fmtDuration(s.secs)}</span>
+            <span className="text-caption2 text-ios-secondary font-semibold shrink-0">{fmtDuration(s.secs)}</span>
           </div>
         ))}
       </div>
@@ -65,8 +55,8 @@ export default function DashboardPage() {
   const [todaySecs, setTodaySecs] = useState(0);
   const [weekSecs, setWeekSecs] = useState(0);
   const [monthSecs, setMonthSecs] = useState(0);
-  const [clients, setClients] = useState([]);
-  const [projects, setProjects] = useState([]);
+  const [clientCount, setClientCount] = useState(0);
+  const [projectCount, setProjectCount] = useState(0);
   const [openTasks, setOpenTasks] = useState(0);
   const [recentEntries, setRecentEntries] = useState([]);
   const [todayByProject, setTodayByProject] = useState([]);
@@ -86,103 +76,96 @@ export default function DashboardPage() {
     const weekStart = new Date(now.getTime() - 6 * 86400000).toISOString();
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
 
-    const [{ data: todayEnt }, { data: weekEnt }, { data: monthEnt }, { data: cli }, { data: proj }, { data: tasks }, { data: recent }] = await Promise.all([
-      supabase.from('time_entries').select('duration_seconds, project_id, projects(name,color,clients(name))').eq('user_id', user.id).not('end_time','is',null).gte('created_at', todayStart),
-      supabase.from('time_entries').select('duration_seconds, project_id').eq('user_id', user.id).not('end_time','is',null).gte('created_at', weekStart),
-      supabase.from('time_entries').select('duration_seconds').eq('user_id', user.id).not('end_time','is',null).gte('created_at', monthStart),
-      supabase.from('clients').select('id').eq('status', null).or('status.is.null,status.eq.active'),
+    const [{ data: todayEnt }, { data: weekEntFull }, { data: monthEnt }, { data: cli }, { data: proj }, { data: tasks }, { data: recent }] = await Promise.all([
+      supabase.from('time_entries').select('duration_seconds,project_id,projects(name,color)').eq('user_id',user.id).not('end_time','is',null).gte('created_at',todayStart),
+      supabase.from('time_entries').select('duration_seconds,project_id,projects(name,color)').eq('user_id',user.id).not('end_time','is',null).gte('created_at',weekStart),
+      supabase.from('time_entries').select('duration_seconds').eq('user_id',user.id).not('end_time','is',null).gte('created_at',monthStart),
+      supabase.from('clients').select('id'),
       supabase.from('projects').select('id').eq('status','active'),
       supabase.from('tasks').select('id').eq('is_archived',false).neq('status','done'),
-      supabase.from('time_entries').select('*, projects(name,color,clients(name))').eq('user_id', user.id).not('end_time','is',null).order('created_at',{ascending:false}).limit(8),
+      supabase.from('time_entries').select('duration_seconds,description,projects(name,color,clients(name))').eq('user_id',user.id).not('end_time','is',null).order('created_at',{ascending:false}).limit(5),
     ]);
 
-    const todayTotal = (todayEnt||[]).reduce((a,e) => a+(e.duration_seconds||0), 0);
-    const weekTotal = (weekEnt||[]).reduce((a,e) => a+(e.duration_seconds||0), 0);
-    const monthTotal = (monthEnt||[]).reduce((a,e) => a+(e.duration_seconds||0), 0);
-
-    setTodaySecs(todayTotal); setWeekSecs(weekTotal); setMonthSecs(monthTotal);
-    setClients(cli||[]); setProjects(proj||[]); setOpenTasks(tasks?.length||0);
+    const today = (todayEnt||[]).reduce((a,e)=>a+(e.duration_seconds||0),0);
+    setTodaySecs(today);
+    setWeekSecs((weekEntFull||[]).reduce((a,e)=>a+(e.duration_seconds||0),0));
+    setMonthSecs((monthEnt||[]).reduce((a,e)=>a+(e.duration_seconds||0),0));
+    setClientCount(cli?.length||0); setProjectCount(proj?.length||0); setOpenTasks(tasks?.length||0);
     setRecentEntries(recent||[]);
 
-    // Today by project (donut)
-    const byProj = {};
+    // Today by project
+    const byP = {};
     (todayEnt||[]).forEach(e => {
       if (!e.project_id) return;
-      if (!byProj[e.project_id]) byProj[e.project_id] = { name: e.projects?.name||'Unknown', color: e.projects?.color||'#007AFF', client: e.projects?.clients?.name, secs: 0 };
-      byProj[e.project_id].secs += (e.duration_seconds||0);
+      if (!byP[e.project_id]) byP[e.project_id] = { name: e.projects?.name||'Unknown', color: e.projects?.color||'#007AFF', secs: 0 };
+      byP[e.project_id].secs += (e.duration_seconds||0);
     });
-    const projList = Object.values(byProj).sort((a,b) => b.secs-a.secs);
-    setTodayByProject(projList);
-    setTodayTotal(todayTotal);
+    setTodayByProject(Object.values(byP).sort((a,b)=>b.secs-a.secs));
+    setTodayTotal(today);
 
-    // This week by project (bar)
-    const byProjWeek = {};
-    // Need project info - re-fetch with project data
-    const { data: weekEntFull } = await supabase.from('time_entries')
-      .select('duration_seconds, project_id, projects(name,color)')
-      .eq('user_id', user.id).not('end_time','is',null).gte('created_at', weekStart);
+    // Week by project
+    const byPW = {};
     (weekEntFull||[]).forEach(e => {
       if (!e.project_id) return;
-      if (!byProjWeek[e.project_id]) byProjWeek[e.project_id] = { name: e.projects?.name||'Unknown', color: e.projects?.color||'#007AFF', secs: 0 };
-      byProjWeek[e.project_id].secs += (e.duration_seconds||0);
+      if (!byPW[e.project_id]) byPW[e.project_id] = { name: e.projects?.name||'Unknown', color: e.projects?.color||'#007AFF', secs: 0 };
+      byPW[e.project_id].secs += (e.duration_seconds||0);
     });
-    setWeekByProject(Object.values(byProjWeek).sort((a,b) => b.secs-a.secs).slice(0,6));
+    setWeekByProject(Object.values(byPW).sort((a,b)=>b.secs-a.secs).slice(0,5));
   }
 
   const dayOfWeek = new Date().toLocaleDateString('en-US', { weekday:'long', day:'numeric', month:'long' });
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-4 max-w-2xl">
       {/* Greeting */}
       <div>
-        <h1 className="text-title2 font-bold text-ios-primary">{greeting()}, {profile?.full_name?.split(' ')[0] || 'there'}! 👋</h1>
-        <p className="text-subhead text-ios-secondary">{dayOfWeek}</p>
+        <h1 className="text-title2 font-bold text-ios-primary">{greeting()}, {profile?.full_name?.split(' ')[0] || 'there'} 👋</h1>
+        <p className="text-footnote text-ios-secondary">{dayOfWeek}</p>
       </div>
 
-      {/* Time stats */}
-      <div className="grid grid-cols-3 gap-3">
-        {[
-          { label:'Today', secs: todaySecs, color:'text-ios-blue' },
-          { label:'This week', secs: weekSecs, color:'text-ios-purple' },
-          { label:'This month', secs: monthSecs, color:'text-ios-green' },
-        ].map(({ label, secs, color }) => (
-          <div key={label} className="card p-4 text-center">
-            <p className={`text-title3 font-bold ${color}`}>{fmtDuration(secs)}</p>
-            <p className="text-footnote text-ios-secondary">{label}</p>
-          </div>
-        ))}
-      </div>
-
-      {/* Today time by project — DONUT */}
-      <div className="card p-5">
-        <div className="flex items-center justify-between mb-4">
-          <p className="text-headline font-semibold text-ios-primary">Today's time</p>
-          <Link href="/dashboard/timer" className="text-footnote text-ios-blue font-semibold flex items-center gap-1">
-            Timer <ArrowRight className="w-3.5 h-3.5" />
+      {/* Time + today chart — combined card */}
+      <div className="card p-4">
+        <div className="flex items-center justify-between mb-3">
+          <p className="text-subhead font-semibold text-ios-primary">Your time</p>
+          <Link href="/dashboard/timer" className="text-caption1 text-ios-blue font-semibold flex items-center gap-0.5">
+            View all <ArrowRight className="w-3 h-3" />
           </Link>
         </div>
-        <DonutChart data={todayByProject} total={todayTotal} />
+        {/* Time stats row */}
+        <div className="grid grid-cols-3 gap-2 mb-4">
+          {[
+            { label:'Today', secs: todaySecs, color:'text-ios-blue' },
+            { label:'This week', secs: weekSecs, color:'text-ios-purple' },
+            { label:'This month', secs: monthSecs, color:'text-ios-green' },
+          ].map(({ label, secs, color }) => (
+            <div key={label} className="bg-ios-bg rounded-ios p-2.5 text-center">
+              <p className={`text-headline font-bold ${color}`}>{fmtDuration(secs)}</p>
+              <p className="text-caption2 text-ios-secondary">{label}</p>
+            </div>
+          ))}
+        </div>
+        {/* Donut chart */}
+        <DonutChart data={todayByProject} total={todayTotal} size={110} />
       </div>
 
-      {/* This week by project — bars */}
+      {/* This week by project */}
       {weekByProject.length > 0 && (
-        <div className="card p-5">
-          <p className="text-headline font-semibold text-ios-primary mb-4">This week by project</p>
-          <div className="space-y-3">
+        <div className="card p-4">
+          <p className="text-subhead font-semibold text-ios-primary mb-3">This week</p>
+          <div className="space-y-2.5">
             {weekByProject.map((p, i) => {
               const max = Math.max(...weekByProject.map(x => x.secs), 1);
-              const pct = (p.secs / max) * 100;
               return (
                 <div key={i}>
                   <div className="flex items-center justify-between mb-1">
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-1.5">
                       <div className="w-2 h-2 rounded-full" style={{ background: p.color }} />
-                      <span className="text-subhead font-medium text-ios-primary">{p.name}</span>
+                      <span className="text-caption1 font-medium text-ios-primary">{p.name}</span>
                     </div>
-                    <span className="text-footnote font-semibold text-ios-secondary">{fmtDuration(p.secs)}</span>
+                    <span className="text-caption2 font-semibold text-ios-secondary">{fmtDuration(p.secs)}</span>
                   </div>
-                  <div className="h-2 bg-ios-fill rounded-full overflow-hidden">
-                    <div className="h-full rounded-full transition-all" style={{ width:`${pct}%`, background: p.color }} />
+                  <div className="h-1.5 bg-ios-fill rounded-full overflow-hidden">
+                    <div className="h-full rounded-full" style={{ width:`${(p.secs/max*100).toFixed(0)}%`, background: p.color }} />
                   </div>
                 </div>
               );
@@ -191,74 +174,41 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* Stats row */}
+      {/* Stats + recent — side by side */}
       <div className="grid grid-cols-3 gap-3">
-        <Link href="/dashboard/clients" className="card p-4 hover:shadow-ios-lg transition-shadow">
-          <div className="w-9 h-9 bg-orange-50 text-ios-orange rounded-ios flex items-center justify-center mb-3"><Users className="w-4 h-4"/></div>
-          <p className="text-title3 font-bold text-ios-primary">{clients.length}</p>
-          <p className="text-footnote text-ios-secondary">Active clients</p>
-          <ArrowRight className="w-3.5 h-3.5 text-ios-tertiary mt-2" />
+        <Link href="/dashboard/clients" className="card p-3 text-center hover:shadow-ios-lg transition-shadow">
+          <p className="text-title3 font-bold text-ios-orange">{clientCount}</p>
+          <p className="text-caption2 text-ios-secondary">Clients</p>
         </Link>
-        <Link href="/dashboard/projects" className="card p-4 hover:shadow-ios-lg transition-shadow">
-          <div className="w-9 h-9 bg-green-50 text-ios-green rounded-ios flex items-center justify-center mb-3"><FolderOpen className="w-4 h-4"/></div>
-          <p className="text-title3 font-bold text-ios-primary">{projects.length}</p>
-          <p className="text-footnote text-ios-secondary">Active projects</p>
-          <ArrowRight className="w-3.5 h-3.5 text-ios-tertiary mt-2" />
+        <Link href="/dashboard/projects" className="card p-3 text-center hover:shadow-ios-lg transition-shadow">
+          <p className="text-title3 font-bold text-ios-green">{projectCount}</p>
+          <p className="text-caption2 text-ios-secondary">Projects</p>
         </Link>
-        <Link href="/dashboard/tasks" className="card p-4 hover:shadow-ios-lg transition-shadow">
-          <div className="w-9 h-9 bg-purple-50 text-ios-purple rounded-ios flex items-center justify-center mb-3"><CheckSquare className="w-4 h-4"/></div>
-          <p className="text-title3 font-bold text-ios-primary">{openTasks}</p>
-          <p className="text-footnote text-ios-secondary">Open tasks</p>
-          <ArrowRight className="w-3.5 h-3.5 text-ios-tertiary mt-2" />
+        <Link href="/dashboard/tasks" className="card p-3 text-center hover:shadow-ios-lg transition-shadow">
+          <p className="text-title3 font-bold text-ios-purple">{openTasks}</p>
+          <p className="text-caption2 text-ios-secondary">Open tasks</p>
         </Link>
       </div>
 
       {/* Recent activity */}
-      <div className="card">
-        <div className="px-4 py-3 border-b border-ios-separator/30 flex items-center justify-between">
-          <p className="text-headline font-semibold text-ios-primary">Recent activity</p>
-          <Link href="/dashboard/timer" className="text-footnote text-ios-blue font-semibold">View all</Link>
-        </div>
-        {recentEntries.length === 0 ? (
-          <div className="p-8 text-center">
-            <Clock className="w-7 h-7 text-ios-label4 mx-auto mb-2" />
-            <p className="text-subhead text-ios-secondary">No time tracked yet</p>
-            <p className="text-footnote text-ios-tertiary mt-1">Start the timer to track your work</p>
+      {recentEntries.length > 0 && (
+        <div className="card">
+          <div className="px-4 py-3 border-b border-ios-separator/30 flex items-center justify-between">
+            <p className="text-subhead font-semibold">Recent activity</p>
+            <Link href="/dashboard/timer" className="text-caption1 text-ios-blue font-semibold">See all</Link>
           </div>
-        ) : recentEntries.map(e => (
-          <div key={e.id} className="flex items-center gap-3 px-4 py-3 border-b border-ios-separator/20 last:border-0">
-            <div className="w-2 h-2 rounded-full shrink-0" style={{ background: e.projects?.color||'#007AFF' }} />
-            <div className="flex-1 min-w-0">
-              <p className="text-subhead font-medium truncate">{e.projects?.name||'No project'}</p>
-              <p className="text-caption1 text-ios-secondary">{e.description||e.projects?.clients?.name||'—'}</p>
+          {recentEntries.map(e => (
+            <div key={e.id} className="flex items-center gap-3 px-4 py-2.5 border-b border-ios-separator/20 last:border-0">
+              <div className="w-2 h-2 rounded-full shrink-0" style={{ background: e.projects?.color||'#007AFF' }} />
+              <div className="flex-1 min-w-0">
+                <p className="text-footnote font-medium truncate">{e.projects?.name || 'No project'}</p>
+                {e.description && <p className="text-caption2 text-ios-secondary truncate">{e.description}</p>}
+              </div>
+              <span className="text-caption1 font-semibold text-ios-secondary shrink-0">{fmtDuration(e.duration_seconds||0)}</span>
             </div>
-            <span className="text-footnote font-semibold text-ios-secondary shrink-0">{fmtDuration(e.duration_seconds||0)}</span>
-          </div>
-        ))}
-      </div>
-
-      {/* Quick actions */}
-      <div className="card p-4">
-        <p className="text-headline font-semibold text-ios-primary mb-3">Quick actions</p>
-        <div className="grid grid-cols-2 gap-3">
-          <Link href="/dashboard/timer" className="flex flex-col items-center gap-2 p-4 bg-blue-50 rounded-ios-lg hover:bg-blue-100 transition-colors">
-            <Play className="w-6 h-6 text-ios-blue" />
-            <span className="text-footnote font-semibold text-ios-blue">Start timer</span>
-          </Link>
-          <Link href="/dashboard/tasks" className="flex flex-col items-center gap-2 p-4 bg-purple-50 rounded-ios-lg hover:bg-purple-100 transition-colors">
-            <CheckSquare className="w-6 h-6 text-ios-purple" />
-            <span className="text-footnote font-semibold text-ios-purple">New task</span>
-          </Link>
-          <Link href="/dashboard/clients" className="flex flex-col items-center gap-2 p-4 bg-orange-50 rounded-ios-lg hover:bg-orange-100 transition-colors">
-            <Users className="w-6 h-6 text-ios-orange" />
-            <span className="text-footnote font-semibold text-ios-orange">New client</span>
-          </Link>
-          <Link href="/dashboard/projects" className="flex flex-col items-center gap-2 p-4 bg-green-50 rounded-ios-lg hover:bg-green-100 transition-colors">
-            <FolderOpen className="w-6 h-6 text-ios-green" />
-            <span className="text-footnote font-semibold text-ios-green">New project</span>
-          </Link>
+          ))}
         </div>
-      </div>
+      )}
     </div>
   );
 }
