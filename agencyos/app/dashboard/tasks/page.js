@@ -32,16 +32,14 @@ const VIEW_KEY = 'agencyos_tasks_view';
 // ─── Download File Helper ─────────────────────────────────────────────────────
 async function downloadFile(url, filename) {
   try {
-    // Try to get Supabase storage signed URL for download
-    // Extract path from URL: everything after /storage/v1/object/public/task-files/
+    // Extract Supabase storage path and use signed download URL
     const marker = '/object/public/task-files/';
     const pathIdx = url.indexOf(marker);
     if (pathIdx !== -1) {
-      const filePath = url.substring(pathIdx + marker.length);
-      const { data } = await import('@/lib/supabase').then(m => m.supabase.storage.from('task-files').createSignedUrl(filePath, 60));
-      if (data?.signedUrl) {
-        const res = await fetch(data.signedUrl);
-        const blob = await res.blob();
+      const filePath = decodeURIComponent(url.substring(pathIdx + marker.length).split('?')[0]);
+      const { supabase: sb } = await import('@/lib/supabase');
+      const { data: blob, error } = await sb.storage.from('task-files').download(filePath);
+      if (!error && blob) {
         const a = document.createElement('a');
         a.href = URL.createObjectURL(blob);
         a.download = filename || 'file';
@@ -52,22 +50,10 @@ async function downloadFile(url, filename) {
         return;
       }
     }
-    // Fallback: direct fetch
-    const res = await fetch(url);
-    const blob = await res.blob();
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = filename || 'file';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(a.href);
-  } catch (err) {
-    console.error('Download error:', err);
-    window.open(url, '_blank');
-  }
+  } catch {}
+  // Fallback: open in new tab
+  window.open(url, '_blank');
 }
-
 
 // ─── Quick Timer ──────────────────────────────────────────────────────────────
 function QuickTimer({ task, activeTimer, elapsed, onStart, onStop }) {
@@ -795,10 +781,15 @@ export default function TasksPage() {
                 <button onClick={() => updateMode('board')} className={`p-2 rounded-ios-sm transition-all ${mode==='board' ? 'bg-white shadow-ios-sm' : ''}`} title="Board">
                   <Kanban className="w-4 h-4 text-ios-secondary" />
                 </button>
+                <button onClick={() => updateMode('archive')} className={`p-2 rounded-ios-sm transition-all ${mode==='archive' ? 'bg-white shadow-ios-sm' : ''}`} title="Archive">
+                  <Archive className="w-4 h-4 text-ios-secondary" />
+                </button>
               </div>
-              <button onClick={() => updateMode('archive')} className="p-2 rounded-ios hover:bg-ios-fill text-ios-tertiary" title="Archive">
-                <Archive className="w-4 h-4" />
-              </button>
+              {mode === 'board' && (
+                <button onClick={() => setNewColModal(true)} className="btn-secondary flex items-center gap-1.5 text-footnote">
+                  <Plus className="w-3.5 h-3.5" /> Column
+                </button>
+              )}
               <button onClick={() => setTaskModal({ project_id: filterProject||'' })} className="btn-primary flex items-center gap-2">
                 <Plus className="w-4 h-4" strokeWidth={2.5} /> New Task
               </button>
@@ -807,11 +798,6 @@ export default function TasksPage() {
           {mode === 'archive' && (
             <button onClick={() => updateMode('list')} className="btn-secondary flex items-center gap-2">
               <ArrowLeft className="w-4 h-4" /> Back
-            </button>
-          )}
-          {mode === 'board' && (
-            <button onClick={() => setNewColModal(true)} className="btn-secondary flex items-center gap-1.5 text-footnote">
-              <Plus className="w-3.5 h-3.5" /> Column
             </button>
           )}
         </div>
