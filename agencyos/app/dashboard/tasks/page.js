@@ -829,12 +829,6 @@ export default function TasksPage() {
               <Archive className="w-4 h-4 text-ios-secondary" />
             </button>
           </div>
-          {/* Column button — only in board, compact */}
-          {mode === 'board' && (
-            <button onClick={() => setNewColModal(true)} className="p-2 rounded-ios bg-ios-fill hover:bg-ios-fill2 text-ios-secondary flex items-center gap-1 text-caption1 font-semibold" title="Add column">
-              <Plus className="w-3.5 h-3.5" /> Col
-            </button>
-          )}
           {/* Back or New Task */}
           {mode === 'archive' ? (
             <button onClick={() => updateMode('list')} className="btn-secondary flex items-center gap-1.5 text-footnote">
@@ -843,6 +837,12 @@ export default function TasksPage() {
           ) : (
             <button onClick={() => setTaskModal({ project_id: filterProject||'' })} className="btn-primary flex items-center gap-1.5">
               <Plus className="w-4 h-4" strokeWidth={2.5} /> New Task
+            </button>
+          )}
+          {/* Column button — only in board */}
+          {mode === 'board' && (
+            <button onClick={() => setNewColModal(true)} className="btn-secondary flex items-center gap-1.5 text-footnote">
+              <Plus className="w-3.5 h-3.5" /> Column
             </button>
           )}
         </div>
