@@ -111,6 +111,8 @@ function TaskDetail({ task, members, boardColumns, projects, labels: allLabels, 
   const [showNewProj, setShowNewProj] = useState(false);
   const [newProjName, setNewProjName] = useState('');
   const [newProjColor, setNewProjColor] = useState('#007AFF');
+  const [newProjClientId, setNewProjClientId] = useState('');
+  const [projClients, setProjClients] = useState([]);
   const [showLabelDrop, setShowLabelDrop] = useState(false);
   const [labelSearch, setLabelSearch] = useState('');
   const [showNewLabel, setShowNewLabel] = useState(false);
@@ -183,9 +185,16 @@ function TaskDetail({ task, members, boardColumns, projects, labels: allLabels, 
 
   async function createProject() {
     if (!newProjName.trim()) return;
-    const { data } = await supabase.from('projects').insert({ name: newProjName.trim(), color: newProjColor, status: 'active' }).select().single();
-    if (data) setForm(p => ({ ...p, project_id: data.id }));
-    setShowNewProj(false); setNewProjName(''); onSave();
+    // Project requires client too - use first available or skip
+    const payload = { name: newProjName.trim(), color: newProjColor, status: 'active' };
+    if (newProjClientId) payload.client_id = newProjClientId;
+    const { data } = await supabase.from('projects').insert(payload).select('*, clients(name)').single();
+    if (data) {
+      setForm(p => ({ ...p, project_id: data.id }));
+      // Add to local projects list without closing modal
+      setProjects(prev => [...prev, data].sort((a,b) => a.name.localeCompare(b.name)));
+    }
+    setShowNewProj(false); setNewProjName(''); setNewProjClientId('');
   }
 
   async function addComment() {
@@ -284,7 +293,11 @@ function TaskDetail({ task, members, boardColumns, projects, labels: allLabels, 
               <div className="absolute top-full left-0 right-0 mt-1 bg-white rounded-ios-lg shadow-ios-modal border border-ios-separator/30 z-50 max-h-60 overflow-y-auto">
                 <div className="p-2 border-b border-ios-separator/30 space-y-1">
                   <input className="input py-1.5 text-footnote" placeholder="Search project..." value={projSearch} onChange={e => setProjSearch(e.target.value)} autoFocus />
-                  <button onClick={() => { setShowNewProj(true); setShowProjDrop(false); }}
+                  <button onClick={async () => {
+                      setShowNewProj(true); setShowProjDrop(false);
+                      const { data: cl } = await supabase.from('clients').select('id,name').order('name');
+                      setProjClients(cl||[]);
+                    }}
                     className="flex items-center gap-2 w-full px-2 py-1.5 text-footnote text-ios-blue hover:bg-blue-50 rounded-ios font-semibold">
                     <Plus className="w-3.5 h-3.5" /> New Project
                   </button>
@@ -306,13 +319,22 @@ function TaskDetail({ task, members, boardColumns, projects, labels: allLabels, 
 
           {showNewProj && (
             <div className="bg-blue-50 rounded-ios p-3 space-y-2">
-              <p className="text-footnote font-semibold text-ios-blue">New Project</p>
-              <input className="input" placeholder="Project name" value={newProjName} onChange={e => setNewProjName(e.target.value)} autoFocus />
-              <div className="flex gap-2">{COL_COLORS.slice(0,6).map(c => <button key={c} onClick={() => setNewProjColor(c)} style={{ background: c }} className={`w-6 h-6 rounded-full ${newProjColor===c ? 'ring-2 ring-offset-1 ring-ios-blue' : ''}`} />)}</div>
-              <div className="flex gap-2">
-                <button className="btn-secondary flex-1 py-1.5 text-footnote" onClick={() => setShowNewProj(false)}>Cancel</button>
-                <button className="btn-primary flex-1 py-1.5 text-footnote" onClick={createProject} disabled={!newProjName.trim()}>Create</button>
+              <div className="flex items-center justify-between">
+                <p className="text-footnote font-semibold text-ios-blue">New Project</p>
+                <button onClick={() => setShowNewProj(false)} className="text-ios-tertiary text-caption1">Cancel</button>
               </div>
+              <input className="input" placeholder="Project name *" value={newProjName} onChange={e => setNewProjName(e.target.value)} autoFocus />
+              <div>
+                <p className="input-label">Client (required)</p>
+                <select className="input" value={newProjClientId} onChange={e => setNewProjClientId(e.target.value)}>
+                  <option value="">— Select client —</option>
+                  {projClients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+              </div>
+              <div className="flex gap-2">{COL_COLORS.slice(0,6).map(c => <button key={c} onClick={() => setNewProjColor(c)} style={{ background: c }} className={`w-6 h-6 rounded-full ${newProjColor===c ? 'ring-2 ring-offset-1 ring-ios-blue' : ''}`} />)}</div>
+              <button className="btn-primary w-full py-1.5 text-footnote" onClick={createProject} disabled={!newProjName.trim()}>
+                Create Project & Select
+              </button>
             </div>
           )}
 
@@ -772,34 +794,33 @@ export default function TasksPage() {
           <p className="text-subhead text-ios-secondary">{mode==='archive' ? `${archivedTasks.length} archived` : `${visible.length} tasks`}</p>
         </div>
         <div className="flex items-center gap-2">
-          {mode !== 'archive' && (
-            <>
-              <div className="flex bg-ios-fill rounded-ios p-0.5 gap-0.5">
-                <button onClick={() => updateMode('list')} className={`p-2 rounded-ios-sm transition-all ${mode==='list' ? 'bg-white shadow-ios-sm' : ''}`} title="List">
-                  <LayoutList className="w-4 h-4 text-ios-secondary" />
-                </button>
-                <button onClick={() => updateMode('board')} className={`p-2 rounded-ios-sm transition-all ${mode==='board' ? 'bg-white shadow-ios-sm' : ''}`} title="Board">
-                  <Kanban className="w-4 h-4 text-ios-secondary" />
-                </button>
-                <button onClick={() => updateMode('archive')} className={`p-2 rounded-ios-sm transition-all ${mode==='archive' ? 'bg-white shadow-ios-sm' : ''}`} title="Archive">
-                  <Archive className="w-4 h-4 text-ios-secondary" />
-                </button>
-              </div>
-              {mode === 'board' && (
-                <button onClick={() => setNewColModal(true)} className="btn-secondary flex items-center gap-1.5 text-footnote">
-                  <Plus className="w-3.5 h-3.5" /> Column
-                </button>
-              )}
+          <div className="flex items-center gap-2">
+            <div className="flex bg-ios-fill rounded-ios p-0.5 gap-0.5">
+              <button onClick={() => updateMode('list')} className={`p-2 rounded-ios-sm transition-all ${mode==='list' ? 'bg-white shadow-ios-sm' : ''}`} title="List">
+                <LayoutList className="w-4 h-4 text-ios-secondary" />
+              </button>
+              <button onClick={() => updateMode('board')} className={`p-2 rounded-ios-sm transition-all ${mode==='board' ? 'bg-white shadow-ios-sm' : ''}`} title="Board">
+                <Kanban className="w-4 h-4 text-ios-secondary" />
+              </button>
+              <button onClick={() => updateMode('archive')} className={`p-2 rounded-ios-sm transition-all ${mode==='archive' ? 'bg-white shadow-ios-sm' : ''}`} title="Archive">
+                <Archive className="w-4 h-4 text-ios-secondary" />
+              </button>
+            </div>
+            {mode === 'board' && (
+              <button onClick={() => setNewColModal(true)} className="btn-secondary flex items-center gap-1.5 text-footnote">
+                <Plus className="w-3.5 h-3.5" /> Column
+              </button>
+            )}
+            {mode === 'archive' ? (
+              <button onClick={() => updateMode('list')} className="btn-secondary flex items-center gap-2">
+                <ArrowLeft className="w-4 h-4" /> Back
+              </button>
+            ) : (
               <button onClick={() => setTaskModal({ project_id: filterProject||'' })} className="btn-primary flex items-center gap-2">
                 <Plus className="w-4 h-4" strokeWidth={2.5} /> New Task
               </button>
-            </>
-          )}
-          {mode === 'archive' && (
-            <button onClick={() => updateMode('list')} className="btn-secondary flex items-center gap-2">
-              <ArrowLeft className="w-4 h-4" /> Back
-            </button>
-          )}
+            )}
+          </div>
         </div>
       </div>
 
@@ -991,13 +1012,14 @@ export default function TasksPage() {
                     );
                   })}
                   {colTasks.length === 0 && (
-                    <div className={`h-12 rounded-ios border-2 border-dashed flex items-center justify-center ${isDragTarget ? 'border-ios-blue' : 'border-ios-separator'}`}>
-                      <p className="text-caption1 text-ios-tertiary">Drop tasks here</p>
+                    <div className={`h-20 rounded-ios border-2 border-dashed flex flex-col items-center justify-center gap-1 transition-all ${isDragTarget ? 'border-ios-blue bg-blue-50' : 'border-ios-separator/50 opacity-50'}`}>
+                      <Kanban className={`w-4 h-4 ${isDragTarget ? 'text-ios-blue' : 'text-ios-label4'}`} />
+                      <p className={`text-caption2 font-medium ${isDragTarget ? 'text-ios-blue' : 'text-ios-label4'}`}>Drop tasks here</p>
                     </div>
                   )}
                   <button onClick={() => setTaskModal({ column_id: col.id, project_id: filterProject||'' })}
-                    className="w-full py-2 text-caption1 text-ios-tertiary hover:text-ios-blue border border-dashed border-ios-separator hover:border-ios-blue rounded-ios flex items-center justify-center gap-1">
-                    <Plus className="w-3 h-3"/> Add task
+                    className="w-full py-2.5 text-footnote font-semibold text-ios-blue hover:bg-blue-50 border-2 border-ios-blue/30 hover:border-ios-blue rounded-ios flex items-center justify-center gap-1.5 transition-all">
+                    <Plus className="w-4 h-4"/> New Task
                   </button>
                 </div>
               </div>
