@@ -44,7 +44,7 @@ export default function BillingPage() {
   const [search, setSearch] = useState('');
   const [filterType, setFilterType] = useState('');
   const [range, setRange] = useState('30days');
-  const [mainTab, setMainTab] = useState('invoices'); // invoices | expenses | overview
+  const [mainTab, setMainTab] = useState('invoices'); // invoices | expenses | overview | upcoming
   const [statusTab, setStatusTab] = useState('all');
   const [invModal, setInvModal] = useState(false);
   const [expModal, setExpModal] = useState(false);
@@ -200,7 +200,7 @@ export default function BillingPage() {
 
       {/* Main tabs */}
       <div className="flex gap-0.5 bg-ios-fill p-1 rounded-ios">
-        {[['invoices','Invoices'],['expenses','Expenses'],['overview','Overview']].map(([k,v]) => (
+        {[['invoices','Invoices'],['expenses','Expenses'],['upcoming','Upcoming'],['overview','Overview']].map(([k,v]) => (
           <button key={k} onClick={() => setMainTab(k)}
             className={`flex-1 py-2 rounded-ios-sm text-footnote font-semibold transition-all ${mainTab===k ? 'bg-white text-ios-primary shadow-ios-sm' : 'text-ios-secondary'}`}>{v}</button>
         ))}
@@ -383,6 +383,82 @@ export default function BillingPage() {
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {/* UPCOMING INVOICES */}
+      {mainTab === 'upcoming' && (
+        <div className="space-y-4">
+          {(() => {
+            const today = new Date();
+            const upcoming = [];
+            // Get all active projects with billing_day and monthly_amount
+            // We'll fetch them via bills reference - show next 60 days
+            const days60 = new Date(today.getTime() + 60*86400000);
+            // Build upcoming from clients + projects billing data
+            // For now show bills that are draft/sent and due soon
+            const dueSoon = bills.filter(b => {
+              if (b.status === 'paid') return false;
+              if (!b.due_date) return false;
+              const due = new Date(b.due_date);
+              return due >= today && due <= days60;
+            }).sort((a,b) => new Date(a.due_date)-new Date(b.due_date));
+
+            const overdue = bills.filter(b => b.status === 'overdue');
+
+            return (
+              <div className="space-y-4">
+                {overdue.length > 0 && (
+                  <div className="card overflow-hidden">
+                    <div className="px-4 py-3 border-b border-ios-separator/30 bg-red-50">
+                      <p className="text-subhead font-semibold text-ios-red">🚨 Overdue ({overdue.length})</p>
+                    </div>
+                    {overdue.map(b => (
+                      <div key={b.id} onClick={() => { setSelectedInv(b); setInvForm({ client_id:b.client_id||'', invoice_number:b.invoice_number||'', amount:b.amount||'', month:b.month||new Date().getMonth()+1, year:b.year||new Date().getFullYear(), issue_date:b.issue_date||'', due_date:b.due_date||'', paid_date:b.paid_date||'', status:b.status||'draft', notes:b.notes||'' }); setInvModal(true); }}
+                        className="list-row hover:bg-red-50 cursor-pointer">
+                        <div className="flex-1">
+                          <p className="text-subhead font-semibold text-ios-red">{b.clients?.name}</p>
+                          <p className="text-footnote text-ios-secondary">Due: {b.due_date ? new Date(b.due_date).toLocaleDateString('en-US',{day:'numeric',month:'short',year:'numeric'}) : '—'}</p>
+                        </div>
+                        <p className="text-subhead font-bold text-ios-red">{fmtCurrency(b.amount)}</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {dueSoon.length > 0 && (
+                  <div className="card overflow-hidden">
+                    <div className="px-4 py-3 border-b border-ios-separator/30">
+                      <p className="text-subhead font-semibold text-ios-primary">Due in next 60 days</p>
+                    </div>
+                    {dueSoon.map(b => {
+                      const daysLeft = Math.round((new Date(b.due_date)-today)/86400000);
+                      return (
+                        <div key={b.id} onClick={() => { setSelectedInv(b); setInvModal(true); }}
+                          className="list-row hover:bg-ios-bg cursor-pointer">
+                          <div className="flex-1">
+                            <p className="text-subhead font-semibold">{b.clients?.name}</p>
+                            <p className="text-footnote text-ios-secondary">Due in {daysLeft} day{daysLeft!==1?'s':''} · {new Date(b.due_date).toLocaleDateString('en-US',{day:'numeric',month:'short'})}</p>
+                          </div>
+                          <div className="flex items-center gap-3">
+                            <span className={`badge ${daysLeft<=7?'badge-red':daysLeft<=14?'badge-orange':'badge-blue'}`}>{daysLeft}d</span>
+                            <p className="text-subhead font-bold">{fmtCurrency(b.amount)}</p>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {dueSoon.length===0 && overdue.length===0 && (
+                  <div className="card p-12 text-center">
+                    <p className="text-subhead text-ios-secondary mb-1">No upcoming invoices</p>
+                    <p className="text-footnote text-ios-tertiary">Add due dates to invoices to see them here</p>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
         </div>
       )}
 
