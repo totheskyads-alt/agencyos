@@ -98,7 +98,13 @@ export default function GlobalTimer() {
               <input className="input" value={editDesc} onChange={e => setEditDesc(e.target.value)} placeholder="What did you work on?" />
             </div>
             <div className="flex gap-3">
-              <button onClick={dismissOverview} className="btn-secondary flex-1">Discard</button>
+              <button onClick={async () => {
+                  await supabase.from('time_entries').delete().eq('id', stoppedEntry.id);
+                  dismissOverview();
+                }}
+                className="flex-1 py-2 rounded-ios text-footnote font-semibold text-white bg-ios-red hover:bg-red-600 transition-colors">
+                Discard
+              </button>
               <button onClick={saveEdit} className="btn-primary flex-1 flex items-center justify-center gap-1.5">
                 <Check className="w-4 h-4" /> Save Entry
               </button>
