@@ -100,7 +100,7 @@ export default function TimerPage() {
   const weekTotal = entries.reduce((a,e) => a + (e.duration_seconds||0), 0);
 
   return (
-    <div className="max-w-xl mx-auto space-y-4">
+    <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-title2 font-bold text-ios-primary">Timer</h1>
