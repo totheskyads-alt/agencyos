@@ -87,7 +87,6 @@ function LabelPill({ label, onRemove }) {
 function TaskDetail({ task, members, boardColumns, projects, labels: allLabels, activeTimer, elapsed, isPaused, onClose, onSave, onDelete, onStartTimer, onStopTimer, onPauseTimer, currentUser }) {
   const isNew = !task?.id;
   const isTimerActive = activeTimer?.task_id === task?.id;
-  const { isPaused, pauseTimer } = require || {};
 
   const [form, setForm] = useState({
     title: task?.title || '',
