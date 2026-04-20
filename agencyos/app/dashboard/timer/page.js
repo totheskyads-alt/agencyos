@@ -30,6 +30,7 @@ export default function TimerPage() {
   const [showPast, setShowPast] = useState(false);
   const [pastForm, setPastForm] = useState({ project_id:'', description:'', date: new Date().toISOString().slice(0,10), start_time:'', duration_minutes:'' });
   const [savingPast, setSavingPast] = useState(false);
+  const [pastProjSearch, setPastProjSearch] = useState('');
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data: { user } }) => { setUser(user); loadData(user); });
@@ -281,10 +282,24 @@ export default function TimerPage() {
           <div className="space-y-4">
             <div>
               <label className="input-label">Project *</label>
-              <select className="input" value={pastForm.project_id} onChange={e => setPastForm({...pastForm, project_id: e.target.value})}>
-                <option value="">— Select project —</option>
-                {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-              </select>
+              <div className="relative">
+                <input className="input" placeholder="Search project..."
+                  value={pastForm.project_id ? (projects.find(p=>p.id===pastForm.project_id)?.name||'') : pastProjSearch}
+                  onChange={e => { setPastProjSearch(e.target.value); setPastForm({...pastForm, project_id: ''}); }}
+                  onFocus={() => { if (pastForm.project_id) { setPastProjSearch(''); setPastForm({...pastForm, project_id: ''}); } }}
+                />
+                {!pastForm.project_id && (
+                  <div className="absolute z-30 w-full bg-white rounded-ios shadow-ios-modal border border-ios-separator/30 max-h-40 overflow-y-auto mt-1">
+                    {projects.filter(p => p.name.toLowerCase().includes(pastProjSearch.toLowerCase())).map(p => (
+                      <button key={p.id} onClick={() => { setPastForm({...pastForm, project_id: p.id}); setPastProjSearch(''); }}
+                        className="flex items-center w-full px-3 py-2.5 hover:bg-ios-fill text-left gap-2">
+                        <div className="w-2 h-2 rounded-full" style={{background: p.color||'#007AFF'}} />
+                        <span className="text-subhead">{p.name}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
             <div>
               <label className="input-label">Description</label>
