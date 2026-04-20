@@ -1,236 +1,222 @@
 'use client';
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
-import { Download, Bug, Plus, Trash2, CheckCircle } from 'lucide-react';
+import { fmtDuration } from '@/lib/utils';
+import Link from 'next/link';
+import { ArrowRight, Clock } from 'lucide-react';
 
-const CATEGORIES = ['UI/Design', 'Timer', 'Tasks', 'Billing', 'Reports', 'Projects', 'Clients', 'Auth', 'Other'];
+function greeting() {
+  const h = new Date().getHours();
+  if (h < 12) return 'Good morning';
+  if (h < 18) return 'Good afternoon';
+  return 'Good evening';
+}
 
-export default function BugsPage() {
-  const [bugs, setBugs] = useState([]);
-  const [form, setForm] = useState({ title: '', category: 'Other', description: '', steps: '', expected: '', actual: '', priority: 'medium' });
-  const [submitted, setSubmitted] = useState(false);
+function DonutChart({ data, total, size = 120 }) {
+  if (!data.length || total === 0) return (
+    <div className="flex items-center justify-center h-20 text-ios-tertiary text-caption1">No time tracked today</div>
+  );
+  const CX = size/2, CY = size/2, R = size/2 - 14, STROKE = 18;
+  const circ = 2 * Math.PI * R;
+  let offset = 0;
+  const slices = data.map(d => {
+    const dash = (d.secs / total) * circ;
+    const sl = { ...d, dash, gap: circ - dash, offset };
+    offset += dash; return sl;
+  });
+  return (
+    <div className="flex items-center gap-4">
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="shrink-0" style={{ transform:'rotate(-90deg)' }}>
+        <circle cx={CX} cy={CY} r={R} fill="none" stroke="#F2F2F7" strokeWidth={STROKE} />
+        {slices.map((s, i) => (
+          <circle key={i} cx={CX} cy={CY} r={R} fill="none" stroke={s.color || '#007AFF'} strokeWidth={STROKE}
+            strokeDasharray={`${s.dash} ${s.gap}`} strokeDashoffset={-s.offset} />
+        ))}
+        <text x={CX} y={CY} textAnchor="middle" dominantBaseline="central" fontSize="11" fontWeight="700" fill="#1C1C1E"
+          style={{ transform:`rotate(90deg)`, transformOrigin:`${CX}px ${CY}px` }}>{fmtDuration(total)}</text>
+      </svg>
+      <div className="flex-1 space-y-1.5 min-w-0">
+        {slices.slice(0, 4).map((s, i) => (
+          <div key={i} className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-1.5 min-w-0">
+              <div className="w-2 h-2 rounded-full shrink-0" style={{ background: s.color }} />
+              <span className="text-caption1 font-medium text-ios-primary truncate">{s.name}</span>
+            </div>
+            <span className="text-caption2 text-ios-secondary font-semibold shrink-0">{fmtDuration(s.secs)}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+export default function DashboardPage() {
   const [profile, setProfile] = useState(null);
+  const [todaySecs, setTodaySecs] = useState(0);
+  const [weekSecs, setWeekSecs] = useState(0);
+  const [monthSecs, setMonthSecs] = useState(0);
+  const [clientCount, setClientCount] = useState(0);
+  const [projectCount, setProjectCount] = useState(0);
+  const [openTasks, setOpenTasks] = useState(0);
+  const [recentEntries, setRecentEntries] = useState([]);
+  const [todayByProject, setTodayByProject] = useState([]);
+  const [todayTotal, setTodayTotal] = useState(0);
+  const [weekByProject, setWeekByProject] = useState([]);
 
-  useEffect(() => {
-    supabase.auth.getUser().then(async ({ data: { user } }) => {
-      const { data: p } = await supabase.from('profiles').select('*').eq('id', user.id).single();
-      setProfile(p);
-      load();
-    });
-  }, []);
+  useEffect(() => { load(); }, []);
 
   async function load() {
-    const { data } = await supabase.from('bugs').select('*').order('created_at', { ascending: false });
-    setBugs(data || []);
-  }
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+    const { data: p } = await supabase.from('profiles').select('*').eq('id', user.id).single();
+    setProfile(p);
 
-  async function submit() {
-    if (!form.title.trim()) return;
-    await supabase.from('bugs').insert({
-      title: form.title, description: form.description, steps_to_reproduce: form.steps,
-      expected_behavior: form.expected, actual_behavior: form.actual,
-      environment: form.category, priority: form.priority, status: 'open',
+    const now = new Date();
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
+    const weekStart = new Date(now.getTime() - 6 * 86400000).toISOString();
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+
+    const [{ data: todayEnt }, { data: weekEntFull }, { data: monthEnt }, { data: cli }, { data: proj }, { data: tasks }, { data: recent }] = await Promise.all([
+      supabase.from('time_entries').select('duration_seconds,project_id,projects(name,color)').eq('user_id',user.id).not('end_time','is',null).gte('created_at',todayStart),
+      supabase.from('time_entries').select('duration_seconds,project_id,projects(name,color)').eq('user_id',user.id).not('end_time','is',null).gte('created_at',weekStart),
+      supabase.from('time_entries').select('duration_seconds').eq('user_id',user.id).not('end_time','is',null).gte('created_at',monthStart),
+      supabase.from('clients').select('id'),
+      supabase.from('projects').select('id').eq('status','active'),
+      supabase.from('tasks').select('id').eq('is_archived',false).neq('status','done').not('project_id','is',null),
+      supabase.from('time_entries').select('duration_seconds,description,projects(name,color,clients(name))').eq('user_id',user.id).not('end_time','is',null).order('created_at',{ascending:false}).limit(5),
+    ]);
+
+    const today = (todayEnt||[]).reduce((a,e)=>a+(e.duration_seconds||0),0);
+    setTodaySecs(today);
+    setWeekSecs((weekEntFull||[]).reduce((a,e)=>a+(e.duration_seconds||0),0));
+    setMonthSecs((monthEnt||[]).reduce((a,e)=>a+(e.duration_seconds||0),0));
+    setClientCount(cli?.length||0); setProjectCount(proj?.length||0); setOpenTasks(tasks?.length||0);
+    setRecentEntries(recent||[]);
+
+    // Today by project
+    const byP = {};
+    (todayEnt||[]).forEach(e => {
+      if (!e.project_id) return;
+      if (!byP[e.project_id]) byP[e.project_id] = { name: e.projects?.name||'Unknown', color: e.projects?.color||'#007AFF', secs: 0 };
+      byP[e.project_id].secs += (e.duration_seconds||0);
     });
-    setForm({ title: '', category: 'Other', description: '', steps: '', expected: '', actual: '', priority: 'medium' });
-    setSubmitted(true);
-    setTimeout(() => setSubmitted(false), 3000);
-    load();
+    setTodayByProject(Object.values(byP).sort((a,b)=>b.secs-a.secs));
+    setTodayTotal(today);
+
+    // Week by project
+    const byPW = {};
+    (weekEntFull||[]).forEach(e => {
+      if (!e.project_id) return;
+      if (!byPW[e.project_id]) byPW[e.project_id] = { name: e.projects?.name||'Unknown', color: e.projects?.color||'#007AFF', secs: 0 };
+      byPW[e.project_id].secs += (e.duration_seconds||0);
+    });
+    setWeekByProject(Object.values(byPW).sort((a,b)=>b.secs-a.secs).slice(0,5));
   }
 
-  async function resolve(id) {
-    await supabase.from('bugs').update({ status: 'resolved' }).eq('id', id);
-    load();
-  }
-
-  async function del(id) {
-    await supabase.from('bugs').delete().eq('id', id);
-    load();
-  }
-
-  function downloadForClaude() {
-    const open = bugs.filter(b => b.status !== 'resolved');
-    if (open.length === 0) { alert('No open bugs to export.'); return; }
-
-    const md = `# Sky Metrics — Bug Report
-Generated: ${new Date().toLocaleString()}
-Platform: https://sky-metrics.online
-Stack: Next.js 14, Supabase, Vercel
-
----
-
-${open.map((b, i) => `## Bug ${i + 1}: ${b.title}
-
-**Category:** ${b.environment || 'General'}
-**Priority:** ${b.priority}
-**Status:** ${b.status}
-**Reported:** ${new Date(b.created_at).toLocaleDateString()}
-
-**Description:**
-${b.description || '—'}
-
-**Steps to Reproduce:**
-${b.steps_to_reproduce || '—'}
-
-**Expected:**
-${b.expected_behavior || '—'}
-
-**Actual:**
-${b.actual_behavior || '—'}
-
----`).join('\n\n')}
-
-## Instructions for Claude:
-Please analyze the bugs above and provide fixed files.
-Repository structure: agencyos/app/dashboard/ + agencyos/components/ + agencyos/lib/
-`;
-
-    const blob = new Blob([md], { type: 'text/markdown' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `skymetrics-bugs-${new Date().toISOString().slice(0,10)}.md`;
-    a.click();
-    URL.revokeObjectURL(url);
-  }
-
-  const openBugs = bugs.filter(b => b.status !== 'resolved');
-  const resolvedBugs = bugs.filter(b => b.status === 'resolved');
-
-  const priorityColor = { low: 'text-ios-secondary', medium: 'text-ios-orange', high: 'text-ios-red', critical: 'text-red-800' };
+  const dayOfWeek = new Date().toLocaleDateString('en-US', { weekday:'long', day:'numeric', month:'long' });
 
   return (
-    <div className="grid lg:grid-cols-2 gap-6">
-      {/* LEFT: Report form */}
-      <div className="space-y-4">
+    <div className="space-y-4">
+      {/* Greeting */}
+      <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-title2 font-bold text-ios-primary">Report a Bug</h1>
-          <p className="text-subhead text-ios-secondary">Describe the issue and download the report to send to Claude</p>
+          <h1 className="text-title2 font-bold text-ios-primary">{greeting()}, {profile?.nickname || profile?.full_name?.split(' ')[0] || 'there'} 👋</h1>
+          <p className="text-footnote text-ios-secondary">{dayOfWeek}</p>
         </div>
-
-        <div className="card p-5 space-y-4">
-          {submitted && (
-            <div className="flex items-center gap-2 p-3 bg-green-50 rounded-ios text-ios-green text-footnote font-semibold">
-              <CheckCircle className="w-4 h-4" /> Bug reported! Download the file to send to Claude.
-            </div>
-          )}
-
-          <div>
-            <label className="input-label">Title *</label>
-            <input className="input" value={form.title} onChange={e => setForm(p=>({...p,title:e.target.value}))} placeholder="Short description of the issue" />
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="input-label">Section</label>
-              <select className="input" value={form.category} onChange={e => setForm(p=>({...p,category:e.target.value}))}>
-                {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="input-label">Priority</label>
-              <select className="input" value={form.priority} onChange={e => setForm(p=>({...p,priority:e.target.value}))}>
-                <option value="low">Low</option>
-                <option value="medium">Medium</option>
-                <option value="high">High</option>
-                <option value="critical">Critical</option>
-              </select>
-            </div>
-          </div>
-
-          <div>
-            <label className="input-label">What's the problem?</label>
-            <textarea className="input" rows={3} value={form.description} onChange={e => setForm(p=>({...p,description:e.target.value}))} placeholder="Describe what's not working..." />
-          </div>
-
-          <div>
-            <label className="input-label">Steps to reproduce</label>
-            <textarea className="input" rows={3} value={form.steps} onChange={e => setForm(p=>({...p,steps:e.target.value}))} placeholder={"1. Go to...\n2. Click on...\n3. See error"} />
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="input-label">Expected</label>
-              <textarea className="input" rows={2} value={form.expected} onChange={e => setForm(p=>({...p,expected:e.target.value}))} placeholder="What should happen?" />
-            </div>
-            <div>
-              <label className="input-label">Actual</label>
-              <textarea className="input" rows={2} value={form.actual} onChange={e => setForm(p=>({...p,actual:e.target.value}))} placeholder="What actually happens?" />
-            </div>
-          </div>
-
-          <button onClick={submit} disabled={!form.title.trim()}
-            className="btn-primary w-full flex items-center justify-center gap-2">
-            <Bug className="w-4 h-4" /> Save Bug Report
-          </button>
+        <div className="flex gap-3">
+          <Link href="/dashboard/clients" className="card px-4 py-3 text-center hover:shadow-ios-lg transition-shadow">
+            <p className="text-headline font-bold text-ios-orange">{clientCount}</p>
+            <p className="text-caption2 text-ios-secondary">Clients</p>
+          </Link>
+          <Link href="/dashboard/projects" className="card px-4 py-3 text-center hover:shadow-ios-lg transition-shadow">
+            <p className="text-headline font-bold text-ios-green">{projectCount}</p>
+            <p className="text-caption2 text-ios-secondary">Projects</p>
+          </Link>
+          <Link href="/dashboard/tasks" className="card px-4 py-3 text-center hover:shadow-ios-lg transition-shadow">
+            <p className="text-headline font-bold text-ios-purple">{openTasks}</p>
+            <p className="text-caption2 text-ios-secondary">Open tasks</p>
+          </Link>
         </div>
-
-        {/* Download for Claude */}
-        {openBugs.length > 0 && (
-          <div className="card p-4 bg-blue-50 border border-blue-100">
-            <p className="text-subhead font-semibold text-ios-blue mb-1">Send to Claude for fixing</p>
-            <p className="text-footnote text-ios-secondary mb-3">
-              Download a structured file with all {openBugs.length} open bug{openBugs.length > 1 ? 's' : ''}, then paste it in a new conversation with Claude.
-            </p>
-            <button onClick={downloadForClaude}
-              className="btn-primary w-full flex items-center justify-center gap-2 bg-ios-blue">
-              <Download className="w-4 h-4" /> Download Bug Report (.md)
-            </button>
-          </div>
-        )}
       </div>
 
-      {/* RIGHT: Bug list */}
-      <div className="space-y-4">
-        <div className="flex items-center justify-between">
-          <p className="text-headline font-semibold">{openBugs.length} open bugs</p>
-          {resolvedBugs.length > 0 && <p className="text-footnote text-ios-tertiary">{resolvedBugs.length} resolved</p>}
+      {/* Main 2-col grid */}
+      <div className="grid lg:grid-cols-2 gap-4">
+        {/* LEFT: Time + donut */}
+        <div className="space-y-4">
+          <div className="card p-5">
+            <div className="flex items-center justify-between mb-4">
+              <p className="text-headline font-semibold text-ios-primary">Today's time</p>
+              <Link href="/dashboard/timer" className="text-caption1 text-ios-blue font-semibold flex items-center gap-0.5">
+                View all <ArrowRight className="w-3 h-3" />
+              </Link>
+            </div>
+            <div className="grid grid-cols-3 gap-2 mb-5">
+              {[
+                { label:'Today', secs: todaySecs, color:'text-ios-blue' },
+                { label:'This week', secs: weekSecs, color:'text-ios-purple' },
+                { label:'This month', secs: monthSecs, color:'text-ios-green' },
+              ].map(({ label, secs, color }) => (
+                <div key={label} className="bg-ios-bg rounded-ios p-3 text-center">
+                  <p className={`text-title3 font-bold ${color}`}>{fmtDuration(secs)}</p>
+                  <p className="text-caption2 text-ios-secondary">{label}</p>
+                </div>
+              ))}
+            </div>
+            <DonutChart data={todayByProject} total={todayTotal} size={130} />
+          </div>
+
+          {/* This week breakdown */}
+          {weekByProject.length > 0 && (
+            <div className="card p-5">
+              <p className="text-headline font-semibold text-ios-primary mb-4">This week by project</p>
+              <div className="space-y-3">
+                {weekByProject.map((p, i) => {
+                  const max = Math.max(...weekByProject.map(x => x.secs), 1);
+                  return (
+                    <div key={i}>
+                      <div className="flex items-center justify-between mb-1.5">
+                        <div className="flex items-center gap-2">
+                          <div className="w-2.5 h-2.5 rounded-full" style={{ background: p.color }} />
+                          <span className="text-subhead font-medium text-ios-primary">{p.name}</span>
+                        </div>
+                        <span className="text-footnote font-semibold text-ios-secondary">{fmtDuration(p.secs)}</span>
+                      </div>
+                      <div className="h-2 bg-ios-fill rounded-full overflow-hidden">
+                        <div className="h-full rounded-full transition-all" style={{ width:`${(p.secs/max*100).toFixed(0)}%`, background: p.color }} />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
 
-        {bugs.length === 0 ? (
-          <div className="card p-12 text-center">
-            <Bug className="w-8 h-8 text-ios-label4 mx-auto mb-3" />
-            <p className="text-subhead text-ios-secondary">No bugs reported yet</p>
+        {/* RIGHT: Recent activity */}
+        <div className="card">
+          <div className="px-5 py-4 border-b border-ios-separator/30 flex items-center justify-between">
+            <p className="text-headline font-semibold text-ios-primary">Recent activity</p>
+            <Link href="/dashboard/timer" className="text-footnote text-ios-blue font-semibold">See all</Link>
           </div>
-        ) : (
-          <div className="space-y-2">
-            {openBugs.map(b => (
-              <div key={b.id} className="card p-4">
-                <div className="flex items-start justify-between gap-2 mb-1">
-                  <div>
-                    <span className="text-subhead font-semibold">{b.title}</span>
-                    <span className={`ml-2 text-caption2 font-semibold uppercase ${priorityColor[b.priority]}`}>{b.priority}</span>
-                  </div>
-                  <div className="flex gap-1.5 shrink-0">
-                    <button onClick={() => resolve(b.id)} className="p-1.5 rounded hover:bg-green-50 text-ios-tertiary hover:text-ios-green" title="Mark resolved">
-                      <CheckCircle className="w-3.5 h-3.5" />
-                    </button>
-                    <button onClick={() => del(b.id)} className="p-1.5 rounded hover:bg-red-50 text-ios-tertiary hover:text-ios-red" title="Delete">
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                </div>
-                <p className="text-caption1 text-ios-blue font-semibold mb-1">{b.environment}</p>
-                {b.description && <p className="text-footnote text-ios-secondary">{b.description}</p>}
+          {recentEntries.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-16 gap-2">
+              <Clock className="w-8 h-8 text-ios-label4" />
+              <p className="text-subhead text-ios-secondary">No activity yet</p>
+              <p className="text-footnote text-ios-tertiary">Start the timer to track work</p>
+            </div>
+          ) : recentEntries.map(e => (
+            <div key={e.id} className="flex items-center gap-3 px-5 py-3.5 border-b border-ios-separator/20 last:border-0 hover:bg-ios-bg/50 transition-colors">
+              <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: e.projects?.color||'#007AFF' }} />
+              <div className="flex-1 min-w-0">
+                <p className="text-subhead font-medium text-ios-primary truncate">{e.projects?.name || 'No project'}</p>
+                {(e.description || e.projects?.clients?.name) && (
+                  <p className="text-caption1 text-ios-secondary truncate">{e.description || e.projects?.clients?.name}</p>
+                )}
               </div>
-            ))}
-
-            {resolvedBugs.length > 0 && (
-              <>
-                <p className="text-caption1 text-ios-tertiary uppercase tracking-wide font-semibold mt-4 px-1">Resolved</p>
-                {resolvedBugs.map(b => (
-                  <div key={b.id} className="card p-4 opacity-50">
-                    <div className="flex items-center justify-between">
-                      <p className="text-subhead line-through text-ios-secondary">{b.title}</p>
-                      <button onClick={() => del(b.id)} className="p-1.5 rounded hover:bg-red-50 text-ios-tertiary hover:text-ios-red">
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </>
-            )}
-          </div>
-        )}
+              <span className="text-footnote font-semibold text-ios-secondary shrink-0">{fmtDuration(e.duration_seconds||0)}</span>
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   );
