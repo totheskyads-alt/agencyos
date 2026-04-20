@@ -257,16 +257,16 @@ function TaskDetail({ task, members, boardColumns, projects, labels: allLabels, 
               {isTimerActive ? `Timer active — ${fmtClock(elapsed)}` : 'Track time on this task'}
             </span>
           </div>
-  <div className="flex gap-2">
+          <div className="flex gap-2">
             {isTimerActive && (
               <button onClick={onPauseTimer}
                 className={`flex items-center gap-1.5 px-3 py-1.5 rounded-ios text-footnote font-semibold text-white ${isPaused ? 'bg-ios-blue' : 'bg-ios-orange'}`}>
-                {isPaused ? <><Play className="w-3.5 h-3.5" fill="white"/>Resume</> : <><Pause className="w-3.5 h-3.5" fill="white"/>Pause</>}
+                {isPaused ? <><Play className="w-3.5 h-3.5" fill="white" />Resume</> : <><Pause className="w-3.5 h-3.5" fill="white" />Pause</>}
               </button>
             )}
             <button onClick={() => isTimerActive ? onStopTimer() : onStartTimer(task)}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-ios text-footnote font-semibold text-white ${isTimerActive ? 'bg-ios-red' : 'bg-ios-blue'}`}>
-              {isTimerActive ? <><Square className="w-3.5 h-3.5" fill="white"/>Stop</> : <><Play className="w-3.5 h-3.5" fill="white"/>Start</>}
+              {isTimerActive ? <><Square className="w-3.5 h-3.5" fill="white" />Stop</> : <><Play className="w-3.5 h-3.5" fill="white" />Start</>}
             </button>
           </div>
         </div>
