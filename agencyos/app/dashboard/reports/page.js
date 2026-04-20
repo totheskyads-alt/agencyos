@@ -8,10 +8,12 @@ import { Clock, Euro, TrendingUp, TrendingDown, Users, BarChart3, Lock } from 'l
 const MONTHS_SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
 const RANGES = [
+  { key: 'today',   label: 'Today' },
   { key: '7days',   label: '7 days' },
   { key: '30days',  label: '30 days' },
   { key: '3months', label: '3 months' },
   { key: '1year',   label: 'This year' },
+  { key: 'custom',  label: 'Custom' },
 ];
 
 const CLIENT_TYPES = {
@@ -44,7 +46,9 @@ function StatCard({ label, value, sub, icon: Icon, color }) {
 
 export default function ReportsPage() {
   const { can, isManager } = useRole();
-  const [range, setRange] = useState('30days');
+  const [range, setRange] = useState('today');
+  const [customFrom, setCustomFrom] = useState('');
+  const [customTo, setCustomTo] = useState('');
   const [activeSection, setActiveSection] = useState('time');
   const [entries, setEntries] = useState([]);
   const [projects, setProjects] = useState([]);
@@ -57,7 +61,7 @@ export default function ReportsPage() {
   const [filterProject, setFilterProject] = useState('');
 
   useEffect(() => { loadMeta(); }, []);
-  useEffect(() => { loadData(); }, [range, filterMember, filterProject]);
+  useEffect(() => { if (range !== 'custom' || customFrom) loadData(); }, [range, filterMember, filterProject, customFrom, customTo]);
 
   async function loadMeta() {
     const [{ data: proj }, { data: cli }, { data: mem }] = await Promise.all([
@@ -72,11 +76,14 @@ export default function ReportsPage() {
 
   function getDateFrom() {
     const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     switch (range) {
+      case 'today':   return today.toISOString();
       case '7days':   return new Date(now.getTime() - 6 * 86400000).toISOString();
       case '30days':  return new Date(now.getTime() - 29 * 86400000).toISOString();
       case '3months': return new Date(now.getFullYear(), now.getMonth() - 2, 1).toISOString();
       case '1year':   return new Date(now.getFullYear(), 0, 1).toISOString();
+      case 'custom':  return customFrom ? new Date(customFrom).toISOString() : new Date(now.getTime() - 29 * 86400000).toISOString();
       default:        return new Date(now.getTime() - 29 * 86400000).toISOString();
     }
   }
@@ -203,6 +210,20 @@ export default function ReportsPage() {
           {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
         </select>
       </div>
+
+      {/* Custom date range */}
+      {range === 'custom' && (
+        <div className="flex items-center gap-3 flex-wrap bg-blue-50 p-3 rounded-ios">
+          <div className="flex items-center gap-2">
+            <label className="text-footnote font-semibold text-ios-secondary">From</label>
+            <input type="date" className="input py-1.5 text-footnote w-40" value={customFrom} onChange={e => setCustomFrom(e.target.value)} />
+          </div>
+          <div className="flex items-center gap-2">
+            <label className="text-footnote font-semibold text-ios-secondary">To</label>
+            <input type="date" className="input py-1.5 text-footnote w-40" value={customTo} onChange={e => setCustomTo(e.target.value)} />
+          </div>
+        </div>
+      )}
 
       {/* Section tabs */}
       <div className="flex gap-0.5 bg-ios-fill p-1 rounded-ios overflow-x-auto">
