@@ -3,26 +3,32 @@ import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import Modal from '@/components/Modal';
 import { fmtDuration, fmtCurrency } from '@/lib/utils';
-import { Plus, Search, ChevronRight, Euro, Trash2, ChevronDown } from 'lucide-react';
+import { Plus, Search, Euro, Trash2, ChevronDown, FolderOpen, Archive } from 'lucide-react';
 
 const COLORS = ['#007AFF','#34C759','#FF9500','#FF3B30','#AF52DE','#32ADE6','#5856D6','#FF2D55','#00C7BE'];
 const MONTHS_FULL = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 const DAYS = Array.from({length:28},(_,i)=>i+1);
 
-const empty = { name:'', description:'', client_id:'', status:'active', color:'#007AFF', billing_day:'', monthly_amount:'' };
+const emptyProj = { name:'', description:'', client_id:'', status:'active', color:'#007AFF', billing_day:'', monthly_amount:'' };
+const emptyClient = { name:'', company:'', client_type:'direct' };
 
 export default function ProjectsPage() {
   const [projects, setProjects] = useState([]);
   const [clients, setClients] = useState([]);
   const [search, setSearch] = useState('');
+  const [activeTab, setActiveTab] = useState('active'); // active | archived
   const [modal, setModal] = useState(false);
   const [invoiceModal, setInvoiceModal] = useState(false);
   const [selected, setSelected] = useState(null);
-  const [form, setForm] = useState(empty);
+  const [form, setForm] = useState(emptyProj);
   const [loading, setLoading] = useState(false);
   const [stats, setStats] = useState({});
   const [invoices, setInvoices] = useState([]);
   const [invForm, setInvForm] = useState({ month: new Date().getMonth()+1, year: new Date().getFullYear(), amount:'' });
+  // Inline new client
+  const [showNewClient, setShowNewClient] = useState(false);
+  const [clientForm, setClientForm] = useState(emptyClient);
+  const [savingClient, setSavingClient] = useState(false);
 
   useEffect(() => { load(); }, []);
 
@@ -44,19 +50,32 @@ export default function ProjectsPage() {
     setInvoices(data||[]);
   }
 
-  function openAdd() { setForm(empty); setSelected(null); setModal(true); }
+  function openAdd() { setForm(emptyProj); setSelected(null); setShowNewClient(false); setClientForm(emptyClient); setModal(true); }
   function openEdit(p) {
     setForm({ name:p.name, description:p.description||'', client_id:p.client_id||'', status:p.status, color:p.color, billing_day:p.billing_day||'', monthly_amount:p.monthly_amount||'' });
-    setSelected(p); setModal(true);
+    setSelected(p); setShowNewClient(false); setModal(true);
   }
-  async function openInvoices(p) {
+  async function openInvoices(p, e) {
+    e.stopPropagation();
     setSelected(p); await loadInvoices(p.id); setInvoiceModal(true);
   }
 
+  async function createClientInline() {
+    if (!clientForm.name.trim()) return;
+    setSavingClient(true);
+    const { data } = await supabase.from('clients').insert({ name: clientForm.name.trim(), company: clientForm.company||null, client_type: clientForm.client_type }).select().single();
+    if (data) {
+      setClients(prev => [...prev, data].sort((a,b) => a.name.localeCompare(b.name)));
+      setForm(prev => ({ ...prev, client_id: data.id }));
+    }
+    setShowNewClient(false); setClientForm(emptyClient); setSavingClient(false);
+  }
+
   async function save() {
-    if (!form.client_id) { alert('Please select a client — required!'); return; }
+    if (!form.client_id) { alert('Please select or create a client — required!'); return; }
+    if (!form.name.trim()) { alert('Project name is required.'); return; }
     setLoading(true);
-    const payload = { ...form, client_id: form.client_id, billing_day: form.billing_day ? parseInt(form.billing_day) : null, monthly_amount: form.monthly_amount ? parseFloat(form.monthly_amount) : null };
+    const payload = { ...form, billing_day: form.billing_day ? parseInt(form.billing_day) : null, monthly_amount: form.monthly_amount ? parseFloat(form.monthly_amount) : null };
     if (selected) await supabase.from('projects').update(payload).eq('id', selected.id);
     else await supabase.from('projects').insert(payload);
     setModal(false); setLoading(false); load();
@@ -66,6 +85,13 @@ export default function ProjectsPage() {
     if (!confirm('Delete this project?')) return;
     await supabase.from('projects').delete().eq('id', id);
     setModal(false); load();
+  }
+
+  async function toggleArchive(p, e) {
+    e.stopPropagation();
+    const newStatus = p.status === 'active' ? 'archived' : 'active';
+    await supabase.from('projects').update({ status: newStatus }).eq('id', p.id);
+    load();
   }
 
   async function addInvoice() {
@@ -79,7 +105,14 @@ export default function ProjectsPage() {
 
   async function delInvoice(id) { await supabase.from('invoices').delete().eq('id',id); loadInvoices(selected.id); }
 
-  const filtered = projects.filter(p => p.name?.toLowerCase().includes(search.toLowerCase()) || p.clients?.name?.toLowerCase().includes(search.toLowerCase()));
+  const filtered = projects.filter(p => {
+    if (activeTab === 'active' && p.status !== 'active') return false;
+    if (activeTab === 'archived' && p.status !== 'archived') return false;
+    return p.name?.toLowerCase().includes(search.toLowerCase()) || p.clients?.name?.toLowerCase().includes(search.toLowerCase());
+  });
+
+  const activeCount = projects.filter(p => p.status === 'active').length;
+  const archivedCount = projects.filter(p => p.status !== 'active').length;
   const years = Array.from({length:3},(_,i)=>new Date().getFullYear()-i);
 
   return (
@@ -87,63 +120,122 @@ export default function ProjectsPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-title2 font-bold text-ios-primary">Projects</h1>
-          <p className="text-subhead text-ios-secondary">{projects.filter(p=>p.status==='active').length} active</p>
+          <p className="text-subhead text-ios-secondary">{activeCount} active{archivedCount > 0 ? ` · ${archivedCount} archived` : ''}</p>
         </div>
         <button onClick={openAdd} className="btn-primary flex items-center gap-2">
           <Plus className="w-4 h-4" strokeWidth={2.5} /> New Project
         </button>
       </div>
 
-      <div className="relative">
-        <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-ios-tertiary"/>
-        <input className="input pl-10" placeholder="Search projects..." value={search} onChange={e=>setSearch(e.target.value)}/>
+      {/* Tabs + search */}
+      <div className="flex items-center gap-3">
+        <div className="flex gap-0.5 bg-ios-fill p-1 rounded-ios">
+          <button onClick={() => setActiveTab('active')}
+            className={`px-4 py-1.5 rounded-ios-sm text-footnote font-semibold transition-all ${activeTab==='active' ? 'bg-white text-ios-primary shadow-ios-sm' : 'text-ios-secondary'}`}>
+            Active {activeCount > 0 && <span className="ml-1 text-ios-blue">{activeCount}</span>}
+          </button>
+          <button onClick={() => setActiveTab('archived')}
+            className={`px-4 py-1.5 rounded-ios-sm text-footnote font-semibold transition-all ${activeTab==='archived' ? 'bg-white text-ios-primary shadow-ios-sm' : 'text-ios-secondary'}`}>
+            Archived {archivedCount > 0 && <span className="ml-1 text-ios-tertiary">{archivedCount}</span>}
+          </button>
+        </div>
+        <div className="relative flex-1">
+          <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-ios-tertiary"/>
+          <input className="input pl-10" placeholder="Search projects..." value={search} onChange={e=>setSearch(e.target.value)}/>
+        </div>
       </div>
 
+      {/* Projects list */}
       {filtered.length === 0 ? (
-        <div className="card p-12 text-center"><p className="text-headline font-semibold text-ios-secondary mb-4">No projects</p><button onClick={openAdd} className="btn-primary">Add Project</button></div>
+        <div className="card p-12 text-center">
+          <FolderOpen className="w-8 h-8 text-ios-label4 mx-auto mb-3" />
+          <p className="text-headline font-semibold text-ios-secondary mb-4">{activeTab === 'active' ? 'No active projects' : 'No archived projects'}</p>
+          {activeTab === 'active' && <button onClick={openAdd} className="btn-primary">New Project</button>}
+        </div>
       ) : (
         <div className="card">
           {filtered.map(p => (
-            <div key={p.id} className="list-row hover:bg-ios-bg transition-colors">
+            <div key={p.id} className="list-row hover:bg-ios-bg transition-colors cursor-pointer" onClick={() => openEdit(p)}>
               <div className="w-3 h-3 rounded-full shrink-0 mr-3" style={{background:p.color}}/>
-              <div className="flex-1 min-w-0 cursor-pointer" onClick={()=>openEdit(p)}>
+              <div className="flex-1 min-w-0">
                 <p className="text-subhead font-semibold text-ios-primary">{p.name}</p>
-                <div className="flex gap-3">
-                  <p className={`text-footnote ${!p.client_id ? 'text-ios-red font-semibold' : 'text-ios-secondary'}`}>{p.clients?.name||'⚠️ No client!'}</p>
-                  {p.billing_day && <p className="text-footnote text-ios-tertiary">· Billing day {p.billing_day}</p>}
+                <div className="flex gap-3 flex-wrap">
+                  <p className={`text-footnote ${!p.client_id ? 'text-ios-red font-semibold' : 'text-ios-secondary'}`}>
+                    {p.clients?.name || '⚠️ No client!'}
+                  </p>
+                  {p.billing_day && <p className="text-footnote text-ios-tertiary">· Day {p.billing_day}</p>}
                   {p.monthly_amount && <p className="text-footnote text-ios-green font-semibold">· {fmtCurrency(p.monthly_amount)}/mo</p>}
                 </div>
               </div>
-              <div className="flex items-center gap-2 shrink-0">
-                {stats[p.id] && <span className="text-footnote text-ios-secondary">{fmtDuration(stats[p.id])}</span>}
-                <button onClick={()=>openInvoices(p)} className="flex items-center gap-1 px-2.5 py-1.5 rounded-ios bg-green-50 text-ios-green text-caption1 font-semibold hover:bg-green-100">
+              <div className="flex items-center gap-2 shrink-0" onClick={e => e.stopPropagation()}>
+                {stats[p.id] > 0 && <span className="text-footnote text-ios-secondary">{fmtDuration(stats[p.id])}</span>}
+                <button onClick={e => openInvoices(p, e)}
+                  className="flex items-center gap-1 px-2.5 py-1.5 rounded-ios bg-green-50 text-ios-green text-caption1 font-semibold hover:bg-green-100">
                   <Euro className="w-3 h-3"/>Invoices
                 </button>
-                <span className={`badge ${p.status==='active' ? 'badge-green' : 'badge-gray'}`}>{p.status==='active' ? 'Active' : 'Archived'}</span>
-                <ChevronRight className="w-4 h-4 text-ios-tertiary cursor-pointer" onClick={()=>openEdit(p)}/>
+                <button onClick={e => toggleArchive(p, e)}
+                  className={`flex items-center gap-1 px-2.5 py-1.5 rounded-ios text-caption1 font-semibold ${p.status==='active' ? 'bg-ios-fill text-ios-secondary hover:bg-ios-fill2' : 'bg-blue-50 text-ios-blue hover:bg-blue-100'}`}
+                  title={p.status==='active' ? 'Archive project' : 'Restore project'}>
+                  <Archive className="w-3 h-3"/>
+                  {p.status==='active' ? 'Archive' : 'Restore'}
+                </button>
               </div>
             </div>
           ))}
         </div>
       )}
 
+      {/* Project Modal */}
       {modal && (
         <Modal title={selected ? 'Edit Project' : 'New Project'} onClose={()=>setModal(false)}>
           <div className="space-y-4">
+            {/* Client selector with inline create */}
             <div>
               <label className="input-label">Client * <span className="text-ios-red">(required)</span></label>
-              <div className="relative">
-                <select className={`input appearance-none pr-9 ${!form.client_id ? 'border-ios-red/50 bg-red-50' : ''}`} value={form.client_id} onChange={e=>setForm({...form,client_id:e.target.value})}>
-                  <option value="">— Select client (required) —</option>
-                  {clients.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}
-                </select>
-                <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-ios-tertiary pointer-events-none"/>
-              </div>
+              {!showNewClient ? (
+                <div className="space-y-2">
+                  <div className="relative">
+                    <select className={`input appearance-none pr-9 ${!form.client_id ? 'border-ios-red/50' : ''}`}
+                      value={form.client_id} onChange={e=>setForm({...form,client_id:e.target.value})}>
+                      <option value="">— Select client (required) —</option>
+                      {clients.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}
+                    </select>
+                    <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-ios-tertiary pointer-events-none"/>
+                  </div>
+                  <button onClick={() => setShowNewClient(true)}
+                    className="flex items-center gap-1.5 text-footnote text-ios-blue hover:bg-blue-50 px-2 py-1.5 rounded-ios font-semibold w-full">
+                    <Plus className="w-3.5 h-3.5" /> Create new client instead
+                  </button>
+                </div>
+              ) : (
+                <div className="bg-blue-50 rounded-ios p-3 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <p className="text-footnote font-semibold text-ios-blue">New Client</p>
+                    <button onClick={() => setShowNewClient(false)} className="text-ios-tertiary hover:text-ios-primary text-caption1">Cancel</button>
+                  </div>
+                  <input className="input" placeholder="Client name *" value={clientForm.name} onChange={e=>setClientForm({...clientForm, name:e.target.value})} autoFocus />
+                  <input className="input" placeholder="Company (optional)" value={clientForm.company} onChange={e=>setClientForm({...clientForm, company:e.target.value})} />
+                  <div className="flex gap-2">
+                    {['direct','whitelabel','colaborator'].map(t => (
+                      <button key={t} onClick={() => setClientForm({...clientForm, client_type:t})}
+                        className={`flex-1 py-1.5 rounded-ios text-caption1 font-semibold transition-all ${clientForm.client_type===t ? 'bg-ios-blue text-white' : 'bg-white text-ios-secondary'}`}>
+                        {t === 'direct' ? 'Direct' : t === 'whitelabel' ? 'White-label' : 'Collaborator'}
+                      </button>
+                    ))}
+                  </div>
+                  <button onClick={createClientInline} disabled={!clientForm.name.trim() || savingClient}
+                    className="btn-primary w-full py-2 text-footnote">
+                    {savingClient ? 'Creating...' : 'Create & Select Client'}
+                  </button>
+                </div>
+              )}
             </div>
-            <div><label className="input-label">Project Name *</label><input className="input" value={form.name} onChange={e=>setForm({...form,name:e.target.value})}/></div>
+
+            <div><label className="input-label">Project Name *</label><input className="input" value={form.name} onChange={e=>setForm({...form,name:e.target.value})} placeholder="e.g. Social Media Management" /></div>
             <div><label className="input-label">Description</label><textarea className="input" rows={2} value={form.description} onChange={e=>setForm({...form,description:e.target.value})}/></div>
+
             <div className="bg-green-50 rounded-ios-lg p-3 space-y-3">
-              <p className="text-footnote font-semibold text-ios-green uppercase tracking-wide">Billing Settings</p>
+              <p className="text-caption1 font-semibold text-ios-green uppercase tracking-wide">Billing Settings</p>
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="input-label">Billing Day</label>
@@ -161,38 +253,46 @@ export default function ProjectsPage() {
                 </div>
               </div>
             </div>
+
             <div>
               <label className="input-label">Color</label>
               <div className="flex gap-2 flex-wrap">{COLORS.map(c=><button key={c} onClick={()=>setForm({...form,color:c})} style={{background:c}} className={`w-8 h-8 rounded-full transition-all ${form.color===c ? 'ring-2 ring-offset-2 ring-ios-blue scale-110' : ''}`}/>)}</div>
             </div>
-            <div>
-              <label className="input-label">Status</label>
-              <div className="flex gap-2">
-                {[['active','Active'],['archived','Archived']].map(([k,v])=>(
-                  <button key={k} onClick={()=>setForm({...form,status:k})} className={`flex-1 py-2 rounded-ios text-footnote font-semibold transition-all ${form.status===k ? 'bg-ios-blue text-white' : 'bg-ios-fill text-ios-secondary'}`}>{v}</button>
-                ))}
+
+            {selected && (
+              <div>
+                <label className="input-label">Status</label>
+                <div className="flex gap-2">
+                  {[['active','Active'],['archived','Archived']].map(([k,v])=>(
+                    <button key={k} onClick={()=>setForm({...form,status:k})} className={`flex-1 py-2 rounded-ios text-footnote font-semibold transition-all ${form.status===k ? 'bg-ios-blue text-white' : 'bg-ios-fill text-ios-secondary'}`}>{v}</button>
+                  ))}
+                </div>
               </div>
-            </div>
+            )}
+
             <div className="flex gap-3 pt-2">
               {selected && <button className="btn-danger" onClick={()=>del(selected.id)}>Delete</button>}
               <button className="btn-secondary flex-1" onClick={()=>setModal(false)}>Cancel</button>
-              <button className="btn-primary flex-1" onClick={save} disabled={loading||!form.name||!form.client_id}>{loading ? 'Saving...' : 'Save'}</button>
+              <button className="btn-primary flex-1" onClick={save} disabled={loading||!form.name||!form.client_id}>
+                {loading ? 'Saving...' : 'Save'}
+              </button>
             </div>
           </div>
         </Modal>
       )}
 
+      {/* Invoices Modal */}
       {invoiceModal && selected && (
         <Modal title={`Invoices — ${selected.name}`} onClose={()=>setInvoiceModal(false)} size="lg">
           <div className="space-y-5">
             {selected.monthly_amount && (
               <div className="bg-blue-50 rounded-ios p-3 text-footnote text-ios-blue">
-                Monthly amount: <strong>{fmtCurrency(selected.monthly_amount)}</strong>
+                Monthly: <strong>{fmtCurrency(selected.monthly_amount)}</strong>
                 {selected.billing_day && ` · Billing day ${selected.billing_day}`}
               </div>
             )}
             <div className="bg-green-50 rounded-ios-lg p-4">
-              <p className="text-subhead font-semibold text-ios-green mb-3">Add Monthly Invoice</p>
+              <p className="text-subhead font-semibold text-ios-green mb-3">Add Invoice</p>
               <div className="grid grid-cols-3 gap-2">
                 <div><label className="input-label">Month</label>
                   <div className="relative"><select className="input appearance-none pr-8" value={invForm.month} onChange={e=>setInvForm({...invForm,month:e.target.value})}>
@@ -205,7 +305,7 @@ export default function ProjectsPage() {
                   </select><ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-ios-tertiary pointer-events-none"/></div>
                 </div>
                 <div><label className="input-label">Amount (€)</label>
-                  <input className="input" type="number" placeholder={selected.monthly_amount||"300"} value={invForm.amount} onChange={e=>setInvForm({...invForm,amount:e.target.value})}/>
+                  <input className="input" type="number" placeholder={selected.monthly_amount||'300'} value={invForm.amount} onChange={e=>setInvForm({...invForm,amount:e.target.value})}/>
                 </div>
               </div>
               {selected.monthly_amount && !invForm.amount && (
@@ -213,7 +313,7 @@ export default function ProjectsPage() {
                   Use monthly amount ({fmtCurrency(selected.monthly_amount)})
                 </button>
               )}
-              <button onClick={addInvoice} disabled={loading||!invForm.amount} className="btn-primary w-full mt-3">{loading ? 'Saving...' : 'Add Invoice'}</button>
+              <button onClick={addInvoice} disabled={loading||!invForm.amount} className="btn-primary w-full mt-3">Add Invoice</button>
             </div>
             <div>
               <p className="text-subhead font-semibold mb-2">History ({invoices.length})</p>
