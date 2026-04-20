@@ -10,6 +10,7 @@ export default function GlobalTimer() {
   const [projects, setProjects] = useState([]);
   const [showStart, setShowStart] = useState(false);
   const [selProject, setSelProject] = useState('');
+  const [projSearch, setProjSearch] = useState('');
   const [description, setDescription] = useState('');
   const [loading, setLoading] = useState(false);
   const [editDuration, setEditDuration] = useState('');
@@ -156,12 +157,31 @@ export default function GlobalTimer() {
           <div className="p-5 space-y-3">
             <div>
               <label className="input-label">Project * (required)</label>
-              <select className="input" value={selProject} onChange={e => setSelProject(e.target.value)} autoFocus>
-                <option value="">— Select project —</option>
-                {projects.map(p => (
-                  <option key={p.id} value={p.id}>{p.name}{p.clients?.name ? ` · ${p.clients.name}` : ''}</option>
-                ))}
-              </select>
+              <div className="relative">
+                <input className="input" placeholder="Search project..."
+                  value={selProject ? (projects.find(p=>p.id===selProject)?.name || '') : projSearch}
+                  onChange={e => { setProjSearch(e.target.value); setSelProject(''); }}
+                  onFocus={() => { if (selProject) { setProjSearch(''); setSelProject(''); } }}
+                  autoFocus
+                />
+                {!selProject && (
+                  <div className="absolute z-30 w-full bg-white rounded-ios shadow-ios-modal border border-ios-separator/30 max-h-48 overflow-y-auto mt-1">
+                    {projects.filter(p => p.name.toLowerCase().includes(projSearch.toLowerCase()) || (p.clients?.name||'').toLowerCase().includes(projSearch.toLowerCase())).map(p => (
+                      <button key={p.id} onClick={() => { setSelProject(p.id); setProjSearch(''); }}
+                        className="flex items-center w-full px-3 py-2.5 hover:bg-ios-fill text-left gap-2">
+                        <div className="w-2 h-2 rounded-full shrink-0" style={{background: p.color||'#007AFF'}} />
+                        <div>
+                          <p className="text-subhead font-medium">{p.name}</p>
+                          {p.clients?.name && <p className="text-caption1 text-ios-secondary">{p.clients.name}</p>}
+                        </div>
+                      </button>
+                    ))}
+                    {projects.filter(p => p.name.toLowerCase().includes(projSearch.toLowerCase())).length === 0 && (
+                      <p className="px-3 py-2 text-footnote text-ios-tertiary">No projects found</p>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
             <div>
               <label className="input-label">Description (optional)</label>
