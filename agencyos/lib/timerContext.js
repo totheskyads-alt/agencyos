@@ -10,6 +10,9 @@ export function TimerProvider({ children }) {
   const [elapsed, setElapsed] = useState(0);
   const [userId, setUserId] = useState(null);
   const [stoppedEntry, setStoppedEntry] = useState(null);
+  const [isPaused, setIsPaused] = useState(false);
+  const [pausedAt, setPausedAt] = useState(null);
+  const [pauseSeconds, setPauseSeconds] = useState(0);
   const intervalRef = useRef(null);
   const pollRef = useRef(null);
 
@@ -73,14 +76,31 @@ export function TimerProvider({ children }) {
     await supabase.from('time_entries').update({ end_time: new Date().toISOString(), duration_seconds: dur }).eq('id', activeTimer.id);
     const { data: stopped } = await supabase.from('time_entries').select('*, projects(name,color), tasks(title)').eq('id', activeTimer.id).single();
     setStoppedEntry(stopped);
-    setActiveTimer(null);
-    setElapsed(0);
+    setActiveTimer(null); setElapsed(0);
+    setIsPaused(false); setPausedAt(null); setPauseSeconds(0);
   }, [activeTimer]);
 
   const dismissOverview = useCallback(() => setStoppedEntry(null), []);
 
+  const pauseTimer = useCallback(async () => {
+    if (!activeTimer) return;
+    if (isPaused) {
+      const pauseDur = Math.round((Date.now() - pausedAt) / 1000);
+      const newTotal = pauseSeconds + pauseDur;
+      setPauseSeconds(newTotal); setPausedAt(null); setIsPaused(false);
+      await supabase.from('time_entries').update({ pause_seconds: newTotal, paused_at: null }).eq('id', activeTimer.id);
+    } else {
+      setPausedAt(Date.now()); setIsPaused(true);
+      await supabase.from('time_entries').update({ paused_at: new Date().toISOString() }).eq('id', activeTimer.id);
+    }
+  }, [activeTimer, isPaused, pausedAt, pauseSeconds]);
+
+  const effectiveElapsed = isPaused
+    ? Math.max(0, elapsed - (pausedAt ? Math.round((Date.now()-pausedAt)/1000) : 0) - pauseSeconds)
+    : Math.max(0, elapsed - pauseSeconds);
+
   return (
-    <TimerContext.Provider value={{ activeTimer, elapsed, userId, stoppedEntry, startTimer, stopTimer, dismissOverview, loadTimer }}>
+    <TimerContext.Provider value={{ activeTimer, elapsed: effectiveElapsed, rawElapsed: elapsed, userId, stoppedEntry, isPaused, startTimer, stopTimer, pauseTimer, dismissOverview, loadTimer }}>
       {children}
     </TimerContext.Provider>
   );
