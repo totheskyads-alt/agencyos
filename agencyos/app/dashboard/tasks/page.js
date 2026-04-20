@@ -693,14 +693,23 @@ export default function TasksPage() {
   }
 
   async function loadColumnsForUser(targetUid, myUid) {
-    if (!targetUid) return;
-    const { data: cols } = await supabase.from('task_columns')
-      .select('*').eq('user_id', targetUid).order('position');
-    let finalCols = cols||[];
-    // If this is MY board and I have no columns yet, create defaults
-    if (finalCols.length === 0 && targetUid === myUid) {
+    // Load shared columns (user_id IS NULL) + personal columns of targetUid
+    const [{ data: shared }, { data: personal }] = await Promise.all([
+      supabase.from('task_columns').select('*').is('user_id', null).order('position'),
+      targetUid
+        ? supabase.from('task_columns').select('*').eq('user_id', targetUid).order('position')
+        : Promise.resolve({ data: [] }),
+    ]);
+
+    // Personal columns override shared if user has any personal ones
+    let finalCols = personal?.length > 0
+      ? [...(shared||[]), ...(personal||[])]
+      : (shared||[]);
+
+    // If no cols at all and this is my board, create defaults as shared
+    if (finalCols.length === 0 && (!targetUid || targetUid === myUid)) {
       const { data: created } = await supabase.from('task_columns')
-        .insert(DEFAULT_COLS.map((c,i) => ({ ...c, position: i, user_id: myUid }))).select();
+        .insert(DEFAULT_COLS.map((c,i) => ({ ...c, position: i, user_id: null }))).select();
       finalCols = created||[];
     }
     setBoardColumns(finalCols);
@@ -758,8 +767,9 @@ export default function TasksPage() {
 
   async function addColumn() {
     if (!newColName.trim()) return;
-    const ownUserId = viewingUserId || currentUser?.id;
-    const { data } = await supabase.from('task_columns').insert({ name: newColName.trim(), color: newColColor, position: boardColumns.length, user_id: ownUserId }).select().single();
+    // Personal column for the board being viewed (null = shared)
+    const colUserId = viewingUserId || currentUser?.id || null;
+    const { data } = await supabase.from('task_columns').insert({ name: newColName.trim(), color: newColColor, position: boardColumns.filter(c=>c.user_id===colUserId).length, user_id: colUserId }).select().single();
     if (data) setBoardColumns(p => [...p, data]);
     setNewColModal(false); setNewColName(''); setNewColColor('#007AFF');
   }
@@ -878,17 +888,18 @@ export default function TasksPage() {
         </div>
       </div>
 
-      {/* Person switcher for admin/manager */}
-      {(role === 'admin' || role === 'manager') && allMembers.length > 1 && (
+      {/* Board person switcher — admin only, only in board mode */}
+      {role === 'admin' && mode === 'board' && allMembers.length > 1 && (
         <div className="flex items-center gap-2 overflow-x-auto pb-1">
-          <button onClick={() => { setViewingUserId(null); }}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-footnote font-semibold whitespace-nowrap transition-all ${!viewingUserId ? 'bg-ios-blue text-white' : 'bg-ios-fill text-ios-secondary hover:bg-ios-fill2'}`}>
+          <span className="text-caption1 text-ios-tertiary font-semibold uppercase tracking-wide shrink-0">Board:</span>
+          <button onClick={() => setViewingUserId(null)}
+            className={`px-3 py-1.5 rounded-full text-footnote font-semibold whitespace-nowrap transition-all ${!viewingUserId ? 'bg-ios-blue text-white' : 'bg-ios-fill text-ios-secondary hover:bg-ios-fill2'}`}>
             My Board
           </button>
-          {allMembers.filter(m => m.id !== currentUser?.id && (role === 'admin' || m.role !== 'admin')).map(m => (
-            <button key={m.id} onClick={() => { setViewingUserId(m.id); }}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-footnote font-semibold whitespace-nowrap transition-all ${viewingUserId === m.id ? 'bg-ios-blue text-white' : 'bg-ios-fill text-ios-secondary hover:bg-ios-fill2'}`}>
-              {m.full_name || m.email}
+          {allMembers.filter(m => m.id !== currentUser?.id).map(m => (
+            <button key={m.id} onClick={() => setViewingUserId(m.id)}
+              className={`px-3 py-1.5 rounded-full text-footnote font-semibold whitespace-nowrap transition-all ${viewingUserId === m.id ? 'bg-ios-blue text-white' : 'bg-ios-fill text-ios-secondary hover:bg-ios-fill2'}`}>
+              {m.full_name?.split(' ')[0] || m.email}
             </button>
           ))}
         </div>
@@ -1015,7 +1026,10 @@ export default function TasksPage() {
       {mode === 'board' && (
         <div className="flex gap-3 overflow-x-auto pb-6" style={{ minHeight: '65vh' }}>
           {boardColumns.map(col => {
-            const colTasks = boardTasks.filter(t => t.column_id===col.id);
+            const isFirstCol = boardColumns[0]?.id === col.id;
+            const knownColIds = new Set(boardColumns.map(c => c.id));
+            const orphanTasks = isFirstCol ? boardTasks.filter(t => !t.column_id || !knownColIds.has(t.column_id)) : [];
+            const colTasks = [...boardTasks.filter(t => t.column_id===col.id), ...orphanTasks];
             const isDragTarget = dragOver===col.id;
             return (
               <div key={col.id}
