@@ -3,7 +3,7 @@ import { useState, useRef, useEffect } from 'react';
 import { useTimer } from '@/lib/timerContext';
 import { supabase } from '@/lib/supabase';
 import { fmtClock, fmtDuration, getElapsed } from '@/lib/utils';
-import { Play, Square, X, Check, ChevronUp, ChevronDown } from 'lucide-react';
+import { Play, Square, Pause, X, Check, ChevronUp, ChevronDown } from 'lucide-react';
 
 export default function GlobalTimer() {
   const { activeTimer, elapsed, stoppedEntry, isPaused, startTimer, stopTimer, pauseTimer, dismissOverview } = useTimer();
@@ -113,17 +113,21 @@ export default function GlobalTimer() {
   if (activeTimer) {
     return (
       <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 lg:left-auto lg:translate-x-0 lg:right-6">
-        <div className="flex items-center gap-3 bg-ios-blue text-white px-4 py-3 rounded-2xl shadow-2xl">
-          <div className="w-2 h-2 bg-white rounded-full animate-pulse shrink-0" />
-          <div className="min-w-0 max-w-[160px]">
+        <div className={`flex items-center gap-3 text-white px-4 py-3 rounded-2xl shadow-2xl transition-colors ${isPaused ? 'bg-ios-orange' : 'bg-ios-blue'}`}>
+          <div className={`w-2 h-2 bg-white rounded-full shrink-0 ${isPaused ? '' : 'animate-pulse'}`} />
+          <div className="min-w-0 max-w-[140px]">
             <p className="text-caption1 font-medium opacity-80 truncate">{activeTimer.projects?.name}</p>
             {(activeTimer.tasks?.title || activeTimer.description) && (
               <p className="text-caption2 opacity-60 truncate">{activeTimer.tasks?.title || activeTimer.description}</p>
             )}
           </div>
           <span className="font-mono text-title3 font-bold tracking-tight">{fmtClock(elapsed)}</span>
+          <button onClick={pauseTimer}
+            className="flex items-center gap-1.5 bg-white/20 hover:bg-white/30 px-2.5 py-1.5 rounded-xl text-footnote font-semibold transition-colors">
+            {isPaused ? <><Play className="w-3.5 h-3.5" fill="white" />Resume</> : <><Pause className="w-3.5 h-3.5" fill="white" />Pause</>}
+          </button>
           <button onClick={handleStop} disabled={loading}
-            className="flex items-center gap-1.5 bg-white/20 hover:bg-white/30 px-3 py-1.5 rounded-xl text-footnote font-semibold transition-colors disabled:opacity-50">
+            className="flex items-center gap-1.5 bg-white/20 hover:bg-white/30 px-2.5 py-1.5 rounded-xl text-footnote font-semibold transition-colors disabled:opacity-50">
             <Square className="w-3.5 h-3.5" fill="white" /> Stop
           </button>
         </div>
