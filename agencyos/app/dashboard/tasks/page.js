@@ -811,39 +811,40 @@ export default function TasksPage() {
   return (
     <div className="space-y-4">
       {/* Header */}
-      <div className="flex items-center justify-between flex-wrap gap-3">
+      <div className="flex items-center justify-between gap-3">
         <div>
           <h1 className="text-title2 font-bold text-ios-primary">{mode==='archive' ? 'Archive' : 'Tasks'}</h1>
           <p className="text-subhead text-ios-secondary">{mode==='archive' ? `${archivedTasks.length} archived` : `${visible.length} tasks`}</p>
         </div>
-        <div className="flex items-center gap-2">
-          <div className="flex items-center gap-2">
-            <div className="flex bg-ios-fill rounded-ios p-0.5 gap-0.5">
-              <button onClick={() => updateMode('list')} className={`p-2 rounded-ios-sm transition-all ${mode==='list' ? 'bg-white shadow-ios-sm' : ''}`} title="List">
-                <LayoutList className="w-4 h-4 text-ios-secondary" />
-              </button>
-              <button onClick={() => updateMode('board')} className={`p-2 rounded-ios-sm transition-all ${mode==='board' ? 'bg-white shadow-ios-sm' : ''}`} title="Board">
-                <Kanban className="w-4 h-4 text-ios-secondary" />
-              </button>
-              <button onClick={() => updateMode('archive')} className={`p-2 rounded-ios-sm transition-all ${mode==='archive' ? 'bg-white shadow-ios-sm' : ''}`} title="Archive">
-                <Archive className="w-4 h-4 text-ios-secondary" />
-              </button>
-            </div>
-            {mode === 'board' && (
-              <button onClick={() => setNewColModal(true)} className="btn-secondary flex items-center gap-1.5 text-footnote">
-                <Plus className="w-3.5 h-3.5" /> Column
-              </button>
-            )}
-            {mode === 'archive' ? (
-              <button onClick={() => updateMode('list')} className="btn-secondary flex items-center gap-2">
-                <ArrowLeft className="w-4 h-4" /> Back
-              </button>
-            ) : (
-              <button onClick={() => setTaskModal({ project_id: filterProject||'' })} className="btn-primary flex items-center gap-2">
-                <Plus className="w-4 h-4" strokeWidth={2.5} /> New Task
-              </button>
-            )}
+        <div className="flex items-center gap-2 shrink-0">
+          {/* View toggle */}
+          <div className="flex bg-ios-fill rounded-ios p-0.5 gap-0.5">
+            <button onClick={() => updateMode('list')} className={`p-2 rounded-ios-sm transition-all ${mode==='list' ? 'bg-white shadow-ios-sm' : ''}`} title="List">
+              <LayoutList className="w-4 h-4 text-ios-secondary" />
+            </button>
+            <button onClick={() => updateMode('board')} className={`p-2 rounded-ios-sm transition-all ${mode==='board' ? 'bg-white shadow-ios-sm' : ''}`} title="Board">
+              <Kanban className="w-4 h-4 text-ios-secondary" />
+            </button>
+            <button onClick={() => updateMode('archive')} className={`p-2 rounded-ios-sm transition-all ${mode==='archive' ? 'bg-white shadow-ios-sm' : ''}`} title="Archive">
+              <Archive className="w-4 h-4 text-ios-secondary" />
+            </button>
           </div>
+          {/* Column button — only in board, compact */}
+          {mode === 'board' && (
+            <button onClick={() => setNewColModal(true)} className="p-2 rounded-ios bg-ios-fill hover:bg-ios-fill2 text-ios-secondary flex items-center gap-1 text-caption1 font-semibold" title="Add column">
+              <Plus className="w-3.5 h-3.5" /> Col
+            </button>
+          )}
+          {/* Back or New Task */}
+          {mode === 'archive' ? (
+            <button onClick={() => updateMode('list')} className="btn-secondary flex items-center gap-1.5 text-footnote">
+              <ArrowLeft className="w-3.5 h-3.5" /> Back
+            </button>
+          ) : (
+            <button onClick={() => setTaskModal({ project_id: filterProject||'' })} className="btn-primary flex items-center gap-1.5">
+              <Plus className="w-4 h-4" strokeWidth={2.5} /> New Task
+            </button>
+          )}
         </div>
       </div>
 
