@@ -1,328 +1,356 @@
 'use client';
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
-import { useTimer } from '@/lib/timerContext';
-import { fmtClock, fmtDuration, fmtTime, getElapsed, parseUTC } from '@/lib/utils';
-import { Square, Pause, Play, Edit2, Trash2, Plus, X, RotateCcw } from 'lucide-react';
 import Modal from '@/components/Modal';
+import { useRole } from '@/lib/useRole';
+import { fmtDuration, fmtCurrency } from '@/lib/utils';
+import { Plus, Search, Euro, Trash2, ChevronDown, FolderOpen, Archive } from 'lucide-react';
 
-function fmtDateGroup(dateStr) {
-  const d = parseUTC(dateStr);
-  if (!d) return 'Unknown';
-  const today = new Date(); today.setHours(0,0,0,0);
-  const yesterday = new Date(today); yesterday.setDate(yesterday.getDate()-1);
-  const ed = new Date(d); ed.setHours(0,0,0,0);
-  if (ed.getTime() === today.getTime()) return 'Today';
-  if (ed.getTime() === yesterday.getTime()) return 'Yesterday';
-  return d.toLocaleDateString('en-US', { weekday:'long', day:'numeric', month:'short' });
-}
+const COLORS = ['#007AFF','#34C759','#FF9500','#FF3B30','#AF52DE','#32ADE6','#5856D6','#FF2D55','#00C7BE'];
+const MONTHS_FULL = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+const DAYS = Array.from({length:28},(_,i)=>i+1);
 
-export default function TimerPage() {
-  const { activeTimer, elapsed, stopTimer } = useTimer();
+const emptyProj = { name:'', description:'', client_id:'', status:'active', color:'#007AFF', billing_day:'', monthly_amount:'' };
+const emptyClient = { name:'', company:'', client_type:'direct' };
+
+export default function ProjectsPage() {
   const [projects, setProjects] = useState([]);
-  const [entries, setEntries] = useState([]);
-  const [user, setUser] = useState(null);
-  const [isPaused, setIsPaused] = useState(false);
-  const [pausedAt, setPausedAt] = useState(null);
-  const [pauseSeconds, setPauseSeconds] = useState(0);
-  const [editingEntry, setEditingEntry] = useState(null);
-  const [editForm, setEditForm] = useState({ duration_minutes:'', description:'', project_id:'' });
-  const [showPast, setShowPast] = useState(false);
-  const [pastForm, setPastForm] = useState({ project_id:'', description:'', date: new Date().toISOString().slice(0,10), start_time:'', duration_minutes:'' });
-  const [savingPast, setSavingPast] = useState(false);
-  const [pastProjSearch, setPastProjSearch] = useState('');
+  const [clients, setClients] = useState([]);
+  const [search, setSearch] = useState('');
+  const [activeTab, setActiveTab] = useState('active'); // active | archived
+  const [modal, setModal] = useState(false);
+  const [invoiceModal, setInvoiceModal] = useState(false);
+  const [selected, setSelected] = useState(null);
+  const [form, setForm] = useState(emptyProj);
+  const [loading, setLoading] = useState(false);
+  const [stats, setStats] = useState({});
+  const [invoices, setInvoices] = useState([]);
+  const [invForm, setInvForm] = useState({ month: new Date().getMonth()+1, year: new Date().getFullYear(), amount:'' });
+  // Inline new client
+  const [showNewClient, setShowNewClient] = useState(false);
+  const [clientSearch, setClientSearch] = useState('');
+  const [clientForm, setClientForm] = useState(emptyClient);
+  const { isAdmin } = useRole();
+  const [savingClient, setSavingClient] = useState(false);
 
-  useEffect(() => {
-    supabase.auth.getUser().then(({ data: { user } }) => { setUser(user); loadData(user); });
-  }, []);
+  useEffect(() => { load(); }, []);
 
-  useEffect(() => { if (user) loadData(user); }, [activeTimer]);
-
-  async function loadData(u) {
-    if (!u) return;
-    const [{ data: proj }, { data: ent }] = await Promise.all([
-      supabase.from('projects').select('id,name,color,clients(name)').eq('status','active').order('name'),
-      supabase.from('time_entries').select('*, projects(name,color,clients(name)), tasks(title)')
-        .eq('user_id', u.id).not('end_time','is',null).order('created_at',{ascending:false}).limit(60),
+  async function load() {
+    const [{ data: proj }, { data: cli }] = await Promise.all([
+      supabase.from('projects').select('*, clients(name)').order('created_at',{ascending:false}),
+      supabase.from('clients').select('id,name').order('name'),
     ]);
     setProjects(proj||[]);
-    setEntries(ent||[]);
+    setClients(cli||[]);
+    const { data: entries } = await supabase.from('time_entries').select('project_id,duration_seconds').not('end_time','is',null);
+    const s = {};
+    (entries||[]).forEach(e => { if (!e.project_id) return; s[e.project_id] = (s[e.project_id]||0)+(e.duration_seconds||0); });
+    setStats(s);
   }
 
-  async function handleStop() {
-    setIsPaused(false); setPausedAt(null); setPauseSeconds(0);
-    await stopTimer();
-    if (user) setTimeout(() => loadData(user), 600);
+  async function loadInvoices(projectId) {
+    const { data } = await supabase.from('invoices').select('*').eq('project_id',projectId).order('year',{ascending:false}).order('month',{ascending:false});
+    setInvoices(data||[]);
   }
 
-  async function handlePause() {
-    if (!activeTimer) return;
-    if (isPaused) {
-      // Resume
-      const pauseDur = Math.round((Date.now() - pausedAt) / 1000);
-      const newPauseTotal = pauseSeconds + pauseDur;
-      setPauseSeconds(newPauseTotal);
-      setPausedAt(null); setIsPaused(false);
-      await supabase.from('time_entries').update({ pause_seconds: newPauseTotal }).eq('id', activeTimer.id);
-    } else {
-      // Pause
-      setPausedAt(Date.now()); setIsPaused(true);
-      await supabase.from('time_entries').update({ paused_at: new Date().toISOString() }).eq('id', activeTimer.id);
-    }
+  function openAdd() { setForm(emptyProj); setSelected(null); setShowNewClient(false); setClientForm(emptyClient); setModal(true); }
+  function openEdit(p) {
+    setForm({ name:p.name, description:p.description||'', client_id:p.client_id||'', status:p.status, color:p.color, billing_day:p.billing_day||'', monthly_amount:p.monthly_amount||'' });
+    setSelected(p); setShowNewClient(false); setModal(true);
+  }
+  async function openInvoices(p, e) {
+    e.stopPropagation();
+    setSelected(p); await loadInvoices(p.id); setInvoiceModal(true);
   }
 
-  async function restartFromEntry(entry) {
-    // Start a new timer with same project + description
-    const { data } = await supabase.from('time_entries').insert({
-      user_id: user.id,
-      project_id: entry.project_id,
-      description: entry.description || entry.tasks?.title || null,
-      task_id: entry.task_id || null,
-      start_time: new Date().toISOString(),
-    }).select('*, projects(name,color), tasks(title)').single();
+  async function createClientInline() {
+    if (!clientForm.name.trim()) return;
+    setSavingClient(true);
+    const { data } = await supabase.from('clients').insert({ name: clientForm.name.trim(), company: clientForm.company||null, client_type: clientForm.client_type }).select().single();
     if (data) {
-      // Reload page to sync timer context
-      window.dispatchEvent(new Event('timer-restart'));
-      loadData(user);
+      setClients(prev => [...prev, data].sort((a,b) => a.name.localeCompare(b.name)));
+      setForm(prev => ({ ...prev, client_id: data.id }));
     }
+    setShowNewClient(false); setClientForm(emptyClient); setSavingClient(false);
   }
 
-  async function saveEdit(entry) {
-    if (!editForm.duration_minutes) return;
-    const secs = Math.round(parseFloat(editForm.duration_minutes) * 60);
-    const start = parseUTC(entry.start_time || entry.created_at);
-    const newEnd = new Date(start.getTime() + secs * 1000).toISOString();
-    await supabase.from('time_entries').update({
-      duration_seconds: secs, end_time: newEnd,
-      description: editForm.description || entry.description,
-      project_id: editForm.project_id || entry.project_id,
-    }).eq('id', entry.id);
-    setEditingEntry(null); loadData(user);
+  async function save() {
+    if (!form.client_id) { alert('Please select or create a client — required!'); return; }
+    if (!form.name.trim()) { alert('Project name is required.'); return; }
+    setLoading(true);
+    const payload = { ...form, billing_day: form.billing_day ? parseInt(form.billing_day) : null, monthly_amount: form.monthly_amount ? parseFloat(form.monthly_amount) : null };
+    if (selected) await supabase.from('projects').update(payload).eq('id', selected.id);
+    else await supabase.from('projects').insert(payload);
+    setModal(false); setLoading(false); load();
   }
 
-  async function deleteEntry(id) {
-    if (!confirm('Delete this time entry?')) return;
-    await supabase.from('time_entries').delete().eq('id', id);
-    loadData(user);
+  async function del(id) {
+    if (!confirm('Delete this project?')) return;
+    await supabase.from('projects').delete().eq('id', id);
+    setModal(false); load();
   }
 
-  async function addPast() {
-    if (!pastForm.project_id || !pastForm.duration_minutes || !user) return;
-    setSavingPast(true);
-    const secs = Math.round(parseFloat(pastForm.duration_minutes) * 60);
-    const startTime = new Date(`${pastForm.date}T${pastForm.start_time || '09:00'}:00`).toISOString();
-    const endTime = new Date(new Date(startTime).getTime() + secs * 1000).toISOString();
-    await supabase.from('time_entries').insert({
-      user_id: user.id, project_id: pastForm.project_id,
-      description: pastForm.description || null,
-      start_time: startTime, end_time: endTime, duration_seconds: secs,
-    });
-    setShowPast(false);
-    setPastForm({ project_id:'', description:'', date: new Date().toISOString().slice(0,10), start_time:'', duration_minutes:'' });
-    setSavingPast(false); loadData(user);
+  async function toggleArchive(p, e) {
+    e.stopPropagation();
+    const newStatus = p.status === 'active' ? 'archived' : 'active';
+    await supabase.from('projects').update({ status: newStatus }).eq('id', p.id);
+    load();
   }
 
-  const grouped = entries.reduce((acc, e) => {
-    const key = fmtDateGroup(e.created_at);
-    if (!acc[key]) acc[key] = [];
-    acc[key].push(e);
-    return acc;
-  }, {});
+  async function addInvoice() {
+    if (!invForm.amount || !selected) return;
+    setLoading(true);
+    await supabase.from('invoices').upsert({ project_id: selected.id, month: parseInt(invForm.month), year: parseInt(invForm.year), amount: parseFloat(invForm.amount) }, { onConflict:'project_id,month,year' });
+    await loadInvoices(selected.id);
+    setInvForm({...invForm, amount:''});
+    setLoading(false);
+  }
 
-  const todayTotal = (grouped['Today']||[]).reduce((a,e) => a+(e.duration_seconds||0), 0);
-  const effectiveElapsed = isPaused ? Math.max(0, elapsed - (pausedAt ? Math.round((Date.now()-pausedAt)/1000) : 0) - pauseSeconds) : Math.max(0, elapsed - pauseSeconds);
+  async function delInvoice(id) { await supabase.from('invoices').delete().eq('id',id); loadInvoices(selected.id); }
+
+  const filtered = projects.filter(p => {
+    if (activeTab === 'active' && p.status !== 'active') return false;
+    if (activeTab === 'archived' && p.status !== 'archived') return false;
+    return p.name?.toLowerCase().includes(search.toLowerCase()) || p.clients?.name?.toLowerCase().includes(search.toLowerCase());
+  });
+
+  const activeCount = projects.filter(p => p.status === 'active').length;
+  const archivedCount = projects.filter(p => p.status !== 'active').length;
+  const years = Array.from({length:3},(_,i)=>new Date().getFullYear()-i);
 
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-title2 font-bold text-ios-primary">Timer</h1>
-          <p className="text-subhead text-ios-secondary">Track your working time</p>
+          <h1 className="text-title2 font-bold text-ios-primary">Projects</h1>
+          <p className="text-subhead text-ios-secondary">{activeCount} active{archivedCount > 0 ? ` · ${archivedCount} archived` : ''}</p>
         </div>
-        <button onClick={() => setShowPast(true)} className="btn-secondary flex items-center gap-2 text-footnote">
-          <Plus className="w-3.5 h-3.5" /> Add past time
+        <button onClick={openAdd} className="btn-primary flex items-center gap-2">
+          <Plus className="w-4 h-4" strokeWidth={2.5} /> New Project
         </button>
       </div>
 
-      {/* Active timer */}
-      {activeTimer ? (
-        <div className="card overflow-hidden">
-          <div className={`p-6 text-center text-white ${isPaused ? 'bg-ios-orange' : 'bg-ios-blue'}`}>
-            <p className="text-caption1 font-medium opacity-75 mb-1">{activeTimer.projects?.name}</p>
-            {(activeTimer.tasks?.title||activeTimer.description) && (
-              <p className="text-footnote opacity-60 mb-3">{activeTimer.tasks?.title||activeTimer.description}</p>
-            )}
-            <div className="font-mono text-[52px] font-bold tracking-tight" style={{lineHeight:1}}>
-              {fmtClock(effectiveElapsed)}
-            </div>
-            {isPaused && <p className="text-caption1 opacity-80 mt-2 font-semibold">⏸ Paused</p>}
-            {!isPaused && <p className="text-caption1 opacity-60 mt-2">Started {fmtTime(activeTimer.start_time)}</p>}
-          </div>
-          <div className="p-4 grid grid-cols-2 gap-3">
-            <button onClick={handlePause}
-              className={`py-3 rounded-ios-lg font-semibold text-subhead flex items-center justify-center gap-2 transition-colors ${isPaused ? 'bg-blue-50 border border-blue-100 text-ios-blue' : 'bg-orange-50 border border-orange-100 text-ios-orange'}`}>
-              {isPaused ? <><Play className="w-4 h-4" fill="currentColor" />Resume</> : <><Pause className="w-4 h-4" fill="currentColor" />Pause</>}
-            </button>
-            <button onClick={handleStop}
-              className="py-3 rounded-ios-lg bg-red-50 border border-red-100 text-ios-red font-semibold text-subhead flex items-center justify-center gap-2 hover:bg-red-100 transition-colors">
-              <Square className="w-4 h-4" fill="currentColor" /> Stop
-            </button>
-          </div>
+      {/* Tabs + search */}
+      <div className="flex items-center gap-3">
+        <div className="flex gap-0.5 bg-ios-fill p-1 rounded-ios">
+          <button onClick={() => setActiveTab('active')}
+            className={`px-4 py-1.5 rounded-ios-sm text-footnote font-semibold transition-all ${activeTab==='active' ? 'bg-white text-ios-primary shadow-ios-sm' : 'text-ios-secondary'}`}>
+            Active {activeCount > 0 && <span className="ml-1 text-ios-blue">{activeCount}</span>}
+          </button>
+          <button onClick={() => setActiveTab('archived')}
+            className={`px-4 py-1.5 rounded-ios-sm text-footnote font-semibold transition-all ${activeTab==='archived' ? 'bg-white text-ios-primary shadow-ios-sm' : 'text-ios-secondary'}`}>
+            Archived {archivedCount > 0 && <span className="ml-1 text-ios-tertiary">{archivedCount}</span>}
+          </button>
+        </div>
+        <div className="relative flex-1">
+          <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-ios-tertiary"/>
+          <input className="input pl-10" placeholder="Search projects..." value={search} onChange={e=>setSearch(e.target.value)}/>
+        </div>
+      </div>
+
+      {/* Projects list */}
+      {filtered.length === 0 ? (
+        <div className="card p-12 text-center">
+          <FolderOpen className="w-8 h-8 text-ios-label4 mx-auto mb-3" />
+          <p className="text-headline font-semibold text-ios-secondary mb-4">{activeTab === 'active' ? 'No active projects' : 'No archived projects'}</p>
+          {activeTab === 'active' && <button onClick={openAdd} className="btn-primary">New Project</button>}
         </div>
       ) : (
-        <div className="card p-6 text-center">
-          <div className="w-16 h-16 bg-ios-fill rounded-full flex items-center justify-center mx-auto mb-3">
-            <Play className="w-7 h-7 text-ios-tertiary" />
-          </div>
-          <p className="text-subhead font-semibold text-ios-secondary">No active timer</p>
-          <p className="text-footnote text-ios-tertiary mt-1">Use the <strong>Start Timer</strong> button (bottom right)</p>
-        </div>
-      )}
-
-      {/* Stats */}
-      {todayTotal > 0 && (
-        <div className="grid grid-cols-2 gap-3">
-          <div className="card p-4 text-center">
-            <p className="text-title3 font-bold text-ios-blue">{fmtDuration(todayTotal)}</p>
-            <p className="text-caption1 text-ios-secondary">Today</p>
-          </div>
-          <div className="card p-4 text-center">
-            <p className="text-title3 font-bold text-ios-purple">{fmtDuration(entries.reduce((a,e)=>a+(e.duration_seconds||0),0))}</p>
-            <p className="text-caption1 text-ios-secondary">Recent total</p>
-          </div>
-        </div>
-      )}
-
-      {/* History */}
-      {Object.entries(grouped).map(([day, dayEntries]) => {
-        const dayTotal = dayEntries.reduce((a,e) => a+(e.duration_seconds||0), 0);
-        return (
-          <div key={day} className="card">
-            <div className="flex items-center justify-between px-4 py-3 border-b border-ios-separator/30">
-              <p className="text-subhead font-semibold text-ios-primary">{day}</p>
-              <p className="text-footnote font-semibold text-ios-secondary">{fmtDuration(dayTotal)}</p>
-            </div>
-            {dayEntries.map(e => {
-              const isEditing = editingEntry === e.id;
-              return (
-                <div key={e.id} className="border-b border-ios-separator/20 last:border-0">
-                  {isEditing ? (
-                    <div className="px-4 py-3 space-y-2 bg-blue-50/50">
-                      <div className="grid grid-cols-2 gap-2">
-                        <div>
-                          <label className="input-label">Project</label>
-                          <select className="input py-1.5 text-footnote" value={editForm.project_id}
-                            onChange={ev => setEditForm({...editForm, project_id: ev.target.value})}>
-                            {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                          </select>
-                        </div>
-                        <div>
-                          <label className="input-label">Duration (min)</label>
-                          <input className="input py-1.5 text-footnote" type="number" value={editForm.duration_minutes}
-                            onChange={ev => setEditForm({...editForm, duration_minutes: ev.target.value})} />
-                          {editForm.duration_minutes && <p className="text-caption2 text-ios-secondary mt-0.5">= {fmtDuration(Math.round(parseFloat(editForm.duration_minutes||0)*60))}</p>}
-                        </div>
-                        <div className="col-span-2">
-                          <label className="input-label">Description</label>
-                          <input className="input py-1.5 text-footnote" value={editForm.description}
-                            onChange={ev => setEditForm({...editForm, description: ev.target.value})} />
-                        </div>
-                      </div>
-                      <div className="flex gap-2">
-                        <button className="btn-secondary flex-1 py-1.5 text-footnote" onClick={() => setEditingEntry(null)}>Cancel</button>
-                        <button className="btn-primary flex-1 py-1.5 text-footnote" onClick={() => saveEdit(e)}>Save</button>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="flex items-center gap-3 px-4 py-3 group hover:bg-ios-bg/50 transition-colors">
-                      <div className="w-2 h-2 rounded-full shrink-0" style={{ background: e.projects?.color||'#007AFF' }} />
-                      <div className="flex-1 min-w-0">
-                        <p className="text-subhead font-medium text-ios-primary truncate">{e.projects?.name||'No project'}</p>
-                        <p className="text-caption1 text-ios-secondary">
-                          {e.tasks?.title||e.description||'—'} · {fmtTime(e.start_time)}–{fmtTime(e.end_time)}
-                        </p>
-                      </div>
-                      <div className="flex items-center gap-1.5 shrink-0">
-                        <span className="text-footnote font-semibold text-ios-secondary">{fmtDuration(e.duration_seconds||0)}</span>
-                        <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                          {/* Restart button */}
-                          <button onClick={() => restartFromEntry(e)}
-                            className="p-1.5 rounded-ios hover:bg-green-50 text-ios-tertiary hover:text-ios-green transition-colors"
-                            title="Restart this timer">
-                            <RotateCcw className="w-3.5 h-3.5" />
-                          </button>
-                          <button onClick={() => { setEditingEntry(e.id); setEditForm({ duration_minutes: Math.round((e.duration_seconds||0)/60).toString(), description: e.description||'', project_id: e.project_id||'' }); }}
-                            className="p-1.5 rounded-ios hover:bg-ios-fill text-ios-tertiary hover:text-ios-blue">
-                            <Edit2 className="w-3.5 h-3.5" />
-                          </button>
-                          <button onClick={() => deleteEntry(e.id)}
-                            className="p-1.5 rounded-ios hover:bg-red-50 text-ios-tertiary hover:text-ios-red">
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  )}
+        <div className="card">
+          {filtered.map(p => (
+            <div key={p.id} className="list-row hover:bg-ios-bg transition-colors cursor-pointer" onClick={() => openEdit(p)}>
+              <div className="w-3 h-3 rounded-full shrink-0 mr-3" style={{background:p.color}}/>
+              <div className="flex-1 min-w-0">
+                <p className="text-subhead font-semibold text-ios-primary">{p.name}</p>
+                <div className="flex gap-3 flex-wrap">
+                  <p className={`text-footnote ${!p.client_id ? 'text-ios-red font-semibold' : 'text-ios-secondary'}`}>
+                    {p.clients?.name || '⚠️ No client!'}
+                  </p>
+                  {p.billing_day && <p className="text-footnote text-ios-tertiary">· Day {p.billing_day}</p>}
+                  {p.monthly_amount && isAdmin && <p className="text-footnote text-ios-green font-semibold">· {fmtCurrency(p.monthly_amount)}/mo</p>}
                 </div>
-              );
-            })}
-          </div>
-        );
-      })}
-
-      {entries.length === 0 && !activeTimer && (
-        <div className="card p-10 text-center">
-          <p className="text-subhead text-ios-secondary">No time entries yet</p>
+              </div>
+              <div className="flex items-center gap-2 shrink-0" onClick={e => e.stopPropagation()}>
+                {stats[p.id] > 0 && <span className="text-footnote text-ios-secondary">{fmtDuration(stats[p.id])}</span>}
+                {isAdmin && (
+                  <button onClick={e => openInvoices(p, e)}
+                    className="flex items-center gap-1 px-2.5 py-1.5 rounded-ios bg-green-50 text-ios-green text-caption1 font-semibold hover:bg-green-100">
+                    <Euro className="w-3 h-3"/>Invoices
+                  </button>
+                )}
+                <button onClick={e => toggleArchive(p, e)}
+                  className={`flex items-center gap-1 px-2.5 py-1.5 rounded-ios text-caption1 font-semibold ${p.status==='active' ? 'bg-ios-fill text-ios-secondary hover:bg-ios-fill2' : 'bg-blue-50 text-ios-blue hover:bg-blue-100'}`}
+                  title={p.status==='active' ? 'Archive project' : 'Restore project'}>
+                  <Archive className="w-3 h-3"/>
+                  {p.status==='active' ? 'Archive' : 'Restore'}
+                </button>
+              </div>
+            </div>
+          ))}
         </div>
       )}
 
-      {/* Add past time Modal */}
-      {showPast && (
-        <Modal title="Add past time entry" onClose={() => setShowPast(false)}>
+      {/* Project Modal */}
+      {modal && (
+        <Modal title={selected ? 'Edit Project' : 'New Project'} onClose={()=>setModal(false)}>
           <div className="space-y-4">
+            {/* Client selector with inline create */}
             <div>
-              <label className="input-label">Project *</label>
-              <div className="relative">
-                <input className="input" placeholder="Search project..."
-                  value={pastForm.project_id ? (projects.find(p=>p.id===pastForm.project_id)?.name||'') : pastProjSearch}
-                  onChange={e => { setPastProjSearch(e.target.value); setPastForm({...pastForm, project_id: ''}); }}
-                  onFocus={() => { if (pastForm.project_id) { setPastProjSearch(''); setPastForm({...pastForm, project_id: ''}); } }}
-                />
-                {!pastForm.project_id && (
-                  <div className="absolute z-30 w-full bg-white rounded-ios shadow-ios-modal border border-ios-separator/30 max-h-40 overflow-y-auto mt-1">
-                    {projects.filter(p => p.name.toLowerCase().includes(pastProjSearch.toLowerCase())).map(p => (
-                      <button key={p.id} onClick={() => { setPastForm({...pastForm, project_id: p.id}); setPastProjSearch(''); }}
-                        className="flex items-center w-full px-3 py-2.5 hover:bg-ios-fill text-left gap-2">
-                        <div className="w-2 h-2 rounded-full" style={{background: p.color||'#007AFF'}} />
-                        <span className="text-subhead">{p.name}</span>
+              <label className="input-label">Client * <span className="text-ios-red">(required)</span></label>
+              {!showNewClient ? (
+                <div className="space-y-2">
+                  <div className="relative">
+                    <div className="relative">
+                      <input className={`input pr-9 ${!form.client_id ? 'border-ios-red/50' : ''}`}
+                        placeholder="Search client..."
+                        value={form.client_id ? clients.find(c=>c.id===form.client_id)?.name || '' : clientSearch}
+                        onChange={e => { setClientSearch(e.target.value); setForm({...form, client_id: ''}); }}
+                        onFocus={() => setClientSearch('')}
+                      />
+                      <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-ios-tertiary pointer-events-none"/>
+                    </div>
+                    {(!form.client_id && (clientSearch || true)) && (
+                      <div className="absolute z-20 w-full bg-white rounded-ios shadow-ios-modal border border-ios-separator/30 max-h-48 overflow-y-auto mt-1">
+                        {clients.filter(c => c.name.toLowerCase().includes(clientSearch.toLowerCase())).map(c => (
+                          <button key={c.id} onClick={() => { setForm({...form, client_id: c.id}); setClientSearch(''); }}
+                            className="flex items-center w-full px-3 py-2.5 hover:bg-ios-fill text-left text-subhead">
+                            {c.name}
+                          </button>
+                        ))}
+                        {clients.filter(c => c.name.toLowerCase().includes(clientSearch.toLowerCase())).length === 0 && (
+                          <p className="px-3 py-2 text-footnote text-ios-tertiary">No clients found</p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                  <button onClick={() => setShowNewClient(true)}
+                    className="flex items-center gap-1.5 text-footnote text-ios-blue hover:bg-blue-50 px-2 py-1.5 rounded-ios font-semibold w-full">
+                    <Plus className="w-3.5 h-3.5" /> Create new client instead
+                  </button>
+                </div>
+              ) : (
+                <div className="bg-blue-50 rounded-ios p-3 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <p className="text-footnote font-semibold text-ios-blue">New Client</p>
+                    <button onClick={() => setShowNewClient(false)} className="text-ios-tertiary hover:text-ios-primary text-caption1">Cancel</button>
+                  </div>
+                  <input className="input" placeholder="Client name *" value={clientForm.name} onChange={e=>setClientForm({...clientForm, name:e.target.value})} autoFocus />
+                  <input className="input" placeholder="Company (optional)" value={clientForm.company} onChange={e=>setClientForm({...clientForm, company:e.target.value})} />
+                  <div className="flex gap-2">
+                    {['direct','whitelabel','colaborator'].map(t => (
+                      <button key={t} onClick={() => setClientForm({...clientForm, client_type:t})}
+                        className={`flex-1 py-1.5 rounded-ios text-caption1 font-semibold transition-all ${clientForm.client_type===t ? 'bg-ios-blue text-white' : 'bg-white text-ios-secondary'}`}>
+                        {t === 'direct' ? 'Direct' : t === 'whitelabel' ? 'White-label' : 'Collaborator'}
                       </button>
                     ))}
                   </div>
-                )}
-              </div>
+                  <button onClick={createClientInline} disabled={!clientForm.name.trim() || savingClient}
+                    className="btn-primary w-full py-2 text-footnote">
+                    {savingClient ? 'Creating...' : 'Create & Select Client'}
+                  </button>
+                </div>
+              )}
             </div>
+
+            <div><label className="input-label">Project Name *</label><input className="input" value={form.name} onChange={e=>setForm({...form,name:e.target.value})} placeholder="e.g. Social Media Management" /></div>
+            <div><label className="input-label">Description</label><textarea className="input" rows={2} value={form.description} onChange={e=>setForm({...form,description:e.target.value})}/></div>
+
+            {isAdmin && <div className="bg-green-50 rounded-ios-lg p-3 space-y-3">
+              <p className="text-caption1 font-semibold text-ios-green uppercase tracking-wide">Billing Settings</p>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="input-label">Billing Day</label>
+                  <div className="relative">
+                    <select className="input appearance-none pr-9" value={form.billing_day} onChange={e=>setForm({...form,billing_day:e.target.value})}>
+                      <option value="">— Select —</option>
+                      {DAYS.map(d=><option key={d} value={d}>Day {d}</option>)}
+                    </select>
+                    <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-ios-tertiary pointer-events-none"/>
+                  </div>
+                </div>
+                <div>
+                  <label className="input-label">Monthly Amount (€)</label>
+                  <input className="input" type="number" placeholder="500" value={form.monthly_amount} onChange={e=>setForm({...form,monthly_amount:e.target.value})}/>
+                </div>
+              </div>
+            </div>}
+
             <div>
-              <label className="input-label">Description</label>
-              <input className="input" placeholder="What did you work on?" value={pastForm.description} onChange={e => setPastForm({...pastForm, description: e.target.value})} />
+              <label className="input-label">Color</label>
+              <div className="flex gap-2 flex-wrap">{COLORS.map(c=><button key={c} onClick={()=>setForm({...form,color:c})} style={{background:c}} className={`w-8 h-8 rounded-full transition-all ${form.color===c ? 'ring-2 ring-offset-2 ring-ios-blue scale-110' : ''}`}/>)}</div>
             </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div><label className="input-label">Date</label>
-                <input className="input" type="date" value={pastForm.date} onChange={e => setPastForm({...pastForm, date: e.target.value})} />
+
+            {selected && (
+              <div>
+                <label className="input-label">Status</label>
+                <div className="flex gap-2">
+                  {[['active','Active'],['archived','Archived']].map(([k,v])=>(
+                    <button key={k} onClick={()=>setForm({...form,status:k})} className={`flex-1 py-2 rounded-ios text-footnote font-semibold transition-all ${form.status===k ? 'bg-ios-blue text-white' : 'bg-ios-fill text-ios-secondary'}`}>{v}</button>
+                  ))}
+                </div>
               </div>
-              <div><label className="input-label">Start time (optional)</label>
-                <input className="input" type="time" value={pastForm.start_time} onChange={e => setPastForm({...pastForm, start_time: e.target.value})} />
-              </div>
-            </div>
-            <div>
-              <label className="input-label">Duration (minutes) *</label>
-              <input className="input" type="number" placeholder="e.g. 90 = 1h 30m" value={pastForm.duration_minutes} onChange={e => setPastForm({...pastForm, duration_minutes: e.target.value})} />
-              {pastForm.duration_minutes && <p className="text-caption1 text-ios-secondary mt-1">= {fmtDuration(Math.round(parseFloat(pastForm.duration_minutes||0)*60))}</p>}
-            </div>
+            )}
+
             <div className="flex gap-3 pt-2">
-              <button className="btn-secondary flex-1" onClick={() => setShowPast(false)}>Cancel</button>
-              <button className="btn-primary flex-1" onClick={addPast} disabled={!pastForm.project_id||!pastForm.duration_minutes||savingPast}>
-                {savingPast ? 'Saving...' : 'Add Entry'}
+              {selected && <button className="btn-danger" onClick={()=>del(selected.id)}>Delete</button>}
+              <button className="btn-secondary flex-1" onClick={()=>setModal(false)}>Cancel</button>
+              <button className="btn-primary flex-1" onClick={save} disabled={loading||!form.name||!form.client_id}>
+                {loading ? 'Saving...' : 'Save'}
               </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* Invoices Modal */}
+      {invoiceModal && selected && (
+        <Modal title={`Invoices — ${selected.name}`} onClose={()=>setInvoiceModal(false)} size="lg">
+          <div className="space-y-5">
+            {selected.monthly_amount && (
+              <div className="bg-blue-50 rounded-ios p-3 text-footnote text-ios-blue">
+                Monthly: <strong>{fmtCurrency(selected.monthly_amount)}</strong>
+                {selected.billing_day && ` · Billing day ${selected.billing_day}`}
+              </div>
+            )}
+            <div className="bg-green-50 rounded-ios-lg p-4">
+              <p className="text-subhead font-semibold text-ios-green mb-3">Add Invoice</p>
+              <div className="grid grid-cols-3 gap-2">
+                <div><label className="input-label">Month</label>
+                  <div className="relative"><select className="input appearance-none pr-8" value={invForm.month} onChange={e=>setInvForm({...invForm,month:e.target.value})}>
+                    {MONTHS_FULL.map((m,i)=><option key={i} value={i+1}>{m}</option>)}
+                  </select><ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-ios-tertiary pointer-events-none"/></div>
+                </div>
+                <div><label className="input-label">Year</label>
+                  <div className="relative"><select className="input appearance-none pr-8" value={invForm.year} onChange={e=>setInvForm({...invForm,year:e.target.value})}>
+                    {years.map(y=><option key={y} value={y}>{y}</option>)}
+                  </select><ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-ios-tertiary pointer-events-none"/></div>
+                </div>
+                <div><label className="input-label">Amount (€)</label>
+                  <input className="input" type="number" placeholder={selected.monthly_amount||'300'} value={invForm.amount} onChange={e=>setInvForm({...invForm,amount:e.target.value})}/>
+                </div>
+              </div>
+              {selected.monthly_amount && !invForm.amount && (
+                <button onClick={()=>setInvForm({...invForm,amount:selected.monthly_amount})} className="text-footnote text-ios-blue mt-2 hover:underline">
+                  Use monthly amount ({fmtCurrency(selected.monthly_amount)})
+                </button>
+              )}
+              <button onClick={addInvoice} disabled={loading||!invForm.amount} className="btn-primary w-full mt-3">Add Invoice</button>
+            </div>
+            <div>
+              <p className="text-subhead font-semibold mb-2">History ({invoices.length})</p>
+              {invoices.length===0 ? <p className="text-footnote text-ios-tertiary text-center py-4">No invoices yet</p> : (
+                <div className="space-y-1.5">
+                  {invoices.map(inv=>(
+                    <div key={inv.id} className="flex items-center justify-between p-3 bg-ios-bg rounded-ios">
+                      <p className="text-subhead font-semibold">{MONTHS_FULL[inv.month-1]} {inv.year}</p>
+                      <div className="flex items-center gap-3">
+                        <p className="text-subhead font-bold text-ios-green">{fmtCurrency(inv.amount)}</p>
+                        <button onClick={()=>delInvoice(inv.id)} className="p-1.5 hover:bg-red-50 rounded-ios text-ios-tertiary hover:text-ios-red"><Trash2 className="w-3.5 h-3.5"/></button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         </Modal>
