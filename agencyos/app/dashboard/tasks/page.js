@@ -9,7 +9,7 @@ import {
   Plus, Search, ChevronDown, ArrowLeft, MessageSquare,
   Paperclip, Trash2, Send, Archive, Kanban, MoreHorizontal,
   Edit2, X, Check, LayoutList, User, Users, Tag, RotateCcw,
-  Play, Square, Timer
+  Play, Square, Pause, Timer
 } from 'lucide-react';
 
 const DEFAULT_COLS = [
@@ -84,9 +84,10 @@ function LabelPill({ label, onRemove }) {
 }
 
 // ─── Task Detail Modal ────────────────────────────────────────────────────────
-function TaskDetail({ task, members, boardColumns, projects, labels: allLabels, activeTimer, elapsed, onClose, onSave, onDelete, onStartTimer, onStopTimer, currentUser }) {
+function TaskDetail({ task, members, boardColumns, projects, labels: allLabels, activeTimer, elapsed, isPaused, onClose, onSave, onDelete, onStartTimer, onStopTimer, onPauseTimer, currentUser }) {
   const isNew = !task?.id;
   const isTimerActive = activeTimer?.task_id === task?.id;
+  const { isPaused, pauseTimer } = require || {};
 
   const [form, setForm] = useState({
     title: task?.title || '',
@@ -257,10 +258,18 @@ function TaskDetail({ task, members, boardColumns, projects, labels: allLabels, 
               {isTimerActive ? `Timer active — ${fmtClock(elapsed)}` : 'Track time on this task'}
             </span>
           </div>
-          <button onClick={() => isTimerActive ? onStopTimer() : onStartTimer(task)}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-ios text-footnote font-semibold text-white ${isTimerActive ? 'bg-ios-red' : 'bg-ios-blue'}`}>
-            {isTimerActive ? <><Square className="w-3.5 h-3.5" fill="white" />Stop</> : <><Play className="w-3.5 h-3.5" fill="white" />Start</>}
-          </button>
+  <div className="flex gap-2">
+            {isTimerActive && (
+              <button onClick={onPauseTimer}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-ios text-footnote font-semibold text-white ${isPaused ? 'bg-ios-blue' : 'bg-ios-orange'}`}>
+                {isPaused ? <><Play className="w-3.5 h-3.5" fill="white"/>Resume</> : <><Pause className="w-3.5 h-3.5" fill="white"/>Pause</>}
+              </button>
+            )}
+            <button onClick={() => isTimerActive ? onStopTimer() : onStartTimer(task)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-ios text-footnote font-semibold text-white ${isTimerActive ? 'bg-ios-red' : 'bg-ios-blue'}`}>
+              {isTimerActive ? <><Square className="w-3.5 h-3.5" fill="white"/>Stop</> : <><Play className="w-3.5 h-3.5" fill="white"/>Start</>}
+            </button>
+          </div>
         </div>
       )}
 
@@ -654,7 +663,7 @@ export default function TasksPage() {
   const [showMemberDrop, setShowMemberDrop] = useState(false);
   const memberRef = useRef(null);
 
-  const { activeTimer, elapsed, startTimer, stopTimer } = useTimer();
+  const { activeTimer, elapsed, isPaused, startTimer, stopTimer, pauseTimer } = useTimer();
   const { isManager, profile: userProfile } = useRole();
 
   useEffect(() => {
@@ -926,7 +935,7 @@ export default function TasksPage() {
                     onOpen={() => setTaskModal(t)}
                     onToggleDone={() => toggleDone(t)}
                     onQuickArchive={() => quickArchive(t.id)}
-                    onStartTimer={handleStartTimer} onStopTimer={stopTimer} />
+                    onStartTimer={handleStartTimer} onStopTimer={stopTimer} onPauseTimer={pauseTimer} isPaused={isPaused} />
                 ))}
                 {!isCollapsed && doneTasks.length > 0 && (
                   <div className="border-t border-ios-separator/20">
@@ -1098,7 +1107,7 @@ export default function TasksPage() {
           onClose={() => setTaskModal(null)}
           onSave={() => { setTaskModal(null); loadAll(); }}
           onDelete={() => deleteTask(taskModal.id)}
-          onStartTimer={handleStartTimer} onStopTimer={stopTimer} />
+          onStartTimer={handleStartTimer} onStopTimer={stopTimer} onPauseTimer={pauseTimer} isPaused={isPaused} />
       )}
 
       {newColModal && (
