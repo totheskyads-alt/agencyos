@@ -114,6 +114,7 @@ function TaskDetail({ task, members, boardColumns, projects, labels: allLabels, 
   const [newProjClientId, setNewProjClientId] = useState('');
   const [projClients, setProjClients] = useState([]);
   const [showLabelDrop, setShowLabelDrop] = useState(false);
+  const [pendingLabels, setPendingLabels] = useState([]);
   const [labelSearch, setLabelSearch] = useState('');
   const [showNewLabel, setShowNewLabel] = useState(false);
   const [newLabelName, setNewLabelName] = useState('');
@@ -388,26 +389,7 @@ function TaskDetail({ task, members, boardColumns, projects, labels: allLabels, 
               <div className="flex flex-wrap gap-1.5 mb-2">
                 {taskLabels.map(l => <LabelPill key={l.id} label={l} onRemove={() => toggleLabel(l)} />)}
               </div>
-              <button onClick={async () => {
-                  if (isNew) {
-                    if (!form.title.trim() || !form.project_id) {
-                      alert('Please fill in Task Title and Project first, then add labels.');
-                      return;
-                    }
-                    // Auto-save task first
-                    setLoading(true);
-                    const payload = { title: form.title.trim(), description: form.description||null, project_id: form.project_id, assigned_to: form.assigned_to||null, due_date: form.due_date||null, column_id: form.column_id||boardColumns[0]?.id||null, priority: form.priority||'medium', status:'todo', position: 0 };
-                    const { data: newTask } = await supabase.from('tasks').insert(payload).select().single();
-                    setLoading(false);
-                    if (newTask) {
-                      // Update the task reference so comments/labels work
-                      task = newTask;
-                      onSave(newTask, true); // pass keepOpen=true
-                    }
-                    return;
-                  }
-                  setShowLabelDrop(!showLabelDrop);
-                }}
+              <button onClick={() => setShowLabelDrop(!showLabelDrop)}
                 className="flex items-center gap-1.5 text-footnote text-ios-blue hover:bg-blue-50 px-2.5 py-1.5 rounded-ios font-semibold">
                 <Tag className="w-3.5 h-3.5" /> Add label
               </button>
@@ -417,7 +399,13 @@ function TaskDetail({ task, members, boardColumns, projects, labels: allLabels, 
                     <input className="input py-1.5 text-footnote" placeholder="Search..." value={labelSearch} onChange={e => setLabelSearch(e.target.value)} autoFocus />
                   </div>
                   {filteredLabels.map(l => (
-                    <button key={l.id} onClick={() => toggleLabel(l)} className="flex items-center justify-between w-full px-3 py-2.5 hover:bg-ios-fill">
+                    <button key={l.id} onClick={() => {
+                      if (isNew) {
+                        setPendingLabels(p => p.some(x=>x.id===l.id) ? p.filter(x=>x.id!==l.id) : [...p, l]);
+                      } else {
+                        toggleLabel(l);
+                      }
+                    }} className="flex items-center justify-between w-full px-3 py-2.5 hover:bg-ios-fill">
                       <span className="flex items-center gap-2">
                         <span className="w-3 h-3 rounded-full" style={{ background: l.color }} />
                         <span className="text-subhead">{l.name}</span>
@@ -687,24 +675,36 @@ export default function TasksPage() {
     return () => document.removeEventListener('mousedown', h);
   }, []);
 
-  async function loadAll() {
-    const [{ data: proj }, { data: mem }, { data: cols }, { data: lbl }] = await Promise.all([
+  async function loadAll(targetUserId) {
+    const { data: { user: me } } = await supabase.auth.getUser();
+    const uid = targetUserId || me?.id;
+
+    const [{ data: proj }, { data: mem }, { data: lbl }] = await Promise.all([
       supabase.from('projects').select('*, clients(id,name)').eq('status','active').order('name'),
-      supabase.from('profiles').select('id,full_name,email').order('full_name'),
-      supabase.from('task_columns').select('*').eq('is_archived',false).order('position'),
+      supabase.from('profiles').select('id,full_name,email,role').order('full_name'),
       supabase.from('labels').select('*').order('name'),
     ]);
     setProjects(proj||[]); setMembers(mem||[]); setLabels(lbl||[]);
-    let finalCols = cols||[];
-    if (finalCols.length === 0) {
-      const { data: created } = await supabase.from('task_columns').insert(DEFAULT_COLS.map((c,i) => ({ ...c, position: i }))).select();
-      finalCols = created||[];
-    }
-    setBoardColumns(finalCols);
+    setAllMembers(mem||[]);
+
+    // Load columns filtered by user
+    await loadColumnsForUser(uid, me?.id);
     await loadTasks();
   }
 
-  const currentUserRef = typeof window !== 'undefined' ? window.__currentUserId : null;
+  async function loadColumnsForUser(targetUid, myUid) {
+    if (!targetUid) return;
+    const { data: cols } = await supabase.from('task_columns')
+      .select('*').eq('user_id', targetUid).order('position');
+    let finalCols = cols||[];
+    // If this is MY board and I have no columns yet, create defaults
+    if (finalCols.length === 0 && targetUid === myUid) {
+      const { data: created } = await supabase.from('task_columns')
+        .insert(DEFAULT_COLS.map((c,i) => ({ ...c, position: i, user_id: myUid }))).select();
+      finalCols = created||[];
+    }
+    setBoardColumns(finalCols);
+  }
 
   async function loadTasks() {
     const { data: { user: currentUser2 } } = await supabase.auth.getUser();
@@ -758,7 +758,8 @@ export default function TasksPage() {
 
   async function addColumn() {
     if (!newColName.trim()) return;
-    const { data } = await supabase.from('task_columns').insert({ name: newColName.trim(), color: newColColor, position: boardColumns.length, user_id: currentUser?.id }).select().single();
+    const ownUserId = viewingUserId || currentUser?.id;
+    const { data } = await supabase.from('task_columns').insert({ name: newColName.trim(), color: newColColor, position: boardColumns.length, user_id: ownUserId }).select().single();
     if (data) setBoardColumns(p => [...p, data]);
     setNewColModal(false); setNewColName(''); setNewColColor('#007AFF');
   }
@@ -880,12 +881,12 @@ export default function TasksPage() {
       {/* Person switcher for admin/manager */}
       {(role === 'admin' || role === 'manager') && allMembers.length > 1 && (
         <div className="flex items-center gap-2 overflow-x-auto pb-1">
-          <button onClick={() => { setViewingUserId(null); loadBoardColumns(currentUser?.id); loadTasks(); }}
+          <button onClick={() => { setViewingUserId(null); }}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-footnote font-semibold whitespace-nowrap transition-all ${!viewingUserId ? 'bg-ios-blue text-white' : 'bg-ios-fill text-ios-secondary hover:bg-ios-fill2'}`}>
             My Board
           </button>
           {allMembers.filter(m => m.id !== currentUser?.id && (role === 'admin' || m.role !== 'admin')).map(m => (
-            <button key={m.id} onClick={() => { setViewingUserId(m.id); loadBoardColumns(m.id); loadTasks(); }}
+            <button key={m.id} onClick={() => { setViewingUserId(m.id); }}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-footnote font-semibold whitespace-nowrap transition-all ${viewingUserId === m.id ? 'bg-ios-blue text-white' : 'bg-ios-fill text-ios-secondary hover:bg-ios-fill2'}`}>
               {m.full_name || m.email}
             </button>
@@ -1044,7 +1045,6 @@ export default function TasksPage() {
                           e.preventDefault(); e.stopPropagation();
                           const srcId = e.dataTransfer.getData('taskId');
                           if (srcId && srcId !== task.id) {
-                            // Reorder: move src before this task in same column
                             const colItems = boardTasks.filter(t => t.column_id === col.id);
                             const srcIdx = colItems.findIndex(t => t.id === srcId);
                             const dstIdx = colItems.findIndex(t => t.id === task.id);
@@ -1052,66 +1052,78 @@ export default function TasksPage() {
                               const reordered = [...colItems];
                               const [moved] = reordered.splice(srcIdx, 1);
                               reordered.splice(dstIdx, 0, moved);
-                              setTasks(prev => {
-                                const others = prev.filter(t => t.column_id !== col.id);
-                                return [...others, ...reordered];
-                              });
+                              setTasks(prev => { const others = prev.filter(t => t.column_id !== col.id); return [...others, ...reordered]; });
                               await Promise.all(reordered.map((t, i) => supabase.from('tasks').update({ position: i, column_id: col.id }).eq('id', t.id)));
                             }
                           }
                           setDragOverTaskId(null);
                         }}
                         onClick={() => setTaskModal(task)}
-                        className={`bg-white rounded-ios border p-3 cursor-pointer hover:shadow-ios transition-all select-none group ${dragOverTaskId === task.id && dragTaskId !== task.id ? 'border-ios-blue border-2 translate-y-0.5' : ''} ${isDone ? 'opacity-60' : isTimerActive ? 'border-ios-blue' : 'border-ios-separator/50'}`}>
+                        className={`bg-white rounded-ios border p-2.5 cursor-pointer hover:shadow-ios transition-all select-none group ${dragOverTaskId === task.id && dragTaskId !== task.id ? 'border-ios-blue border-2' : ''} ${isDone ? 'opacity-50' : isTimerActive ? 'border-ios-blue bg-blue-50/30' : 'border-ios-separator/50'}`}>
+
+                        {/* Row 1: labels + archive */}
                         {labels.length > 0 && (
-                          <div className="flex gap-1 flex-wrap mb-2">
-                            {labels.slice(0,2).map(l => <span key={l.id} className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full text-white" style={{ background: l.color }}>{l.name}</span>)}
+                          <div className="flex gap-1 flex-wrap mb-1.5">
+                            {labels.slice(0,3).map(l => <span key={l.id} className="text-[9px] font-bold px-1.5 py-0.5 rounded-full text-white" style={{background:l.color}}>{l.name}</span>)}
                           </div>
                         )}
-                        <div className="flex items-start gap-2 mb-2">
+
+                        {/* Row 2: checkbox + title + archive */}
+                        <div className="flex items-start gap-1.5">
                           <button onClick={e => { e.stopPropagation(); toggleDone(task); }}
-                            className={`shrink-0 w-4 h-4 rounded-full border-2 flex items-center justify-center mt-0.5 transition-all ${isDone ? 'border-ios-green bg-ios-green' : 'border-ios-separator hover:border-ios-blue'}`}>
-                            {isDone && <Check className="w-2.5 h-2.5 text-white" strokeWidth={3}/>}
+                            className={`shrink-0 w-3.5 h-3.5 rounded-full border-2 flex items-center justify-center mt-0.5 transition-all ${isDone ? 'border-ios-green bg-ios-green' : 'border-ios-separator hover:border-ios-blue'}`}>
+                            {isDone && <Check className="w-2 h-2 text-white" strokeWidth={3}/>}
                           </button>
                           <p className={`text-footnote font-semibold leading-snug flex-1 ${isDone ? 'line-through text-ios-tertiary' : 'text-ios-primary'}`}>{task.title}</p>
                           <button onClick={e => { e.stopPropagation(); quickArchive(task.id); }}
-                            className="opacity-0 group-hover:opacity-100 p-0.5 rounded text-ios-tertiary hover:text-ios-orange transition-all shrink-0"
-                            title="Archive">
-                            <Archive className="w-3 h-3" />
+                            className="opacity-0 group-hover:opacity-100 p-0.5 rounded text-ios-tertiary hover:text-ios-orange shrink-0">
+                            <Archive className="w-3 h-3"/>
                           </button>
                         </div>
-                        {task.projects?.name && (
-                          <div className="flex items-center gap-1 mb-1.5">
-                            <div className="w-1.5 h-1.5 rounded-full" style={{ background: task.projects.color||'#007AFF' }}/>
-                            <span className="text-caption2 text-ios-secondary">{task.projects.name}</span>
-                          </div>
-                        )}
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-1">
-                            {task.comment_count > 0 && <div className="flex items-center gap-0.5 text-ios-tertiary"><MessageSquare className="w-3 h-3"/><span className="text-caption2">{task.comment_count}</span></div>}
-                            {isTimerActive ? (
-                              <div className="flex items-center gap-1">
-                                <button onClick={e => { e.stopPropagation(); pauseTimer(); }}
-                                  className={`flex items-center gap-0.5 px-1.5 py-0.5 rounded text-caption2 font-semibold ${isPaused ? 'bg-blue-50 text-ios-blue' : 'bg-orange-50 text-ios-orange'}`}>
-                                  {isPaused ? <><Play className="w-2.5 h-2.5" fill="currentColor"/>Res</> : <><Pause className="w-2.5 h-2.5" fill="currentColor"/>Pause</>}
-                                </button>
-                                <button onClick={e => { e.stopPropagation(); stopTimer(); }}
-                                  className="flex items-center gap-0.5 px-1.5 py-0.5 rounded text-caption2 font-semibold bg-red-50 text-ios-red">
-                                  <Square className="w-2.5 h-2.5" fill="currentColor"/><span className="font-mono">{fmtClock(elapsed)}</span>
-                                </button>
+
+                        {/* Row 3: project + meta */}
+                        <div className="flex items-center justify-between mt-1.5 gap-1">
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            {task.projects?.name && (
+                              <div className="flex items-center gap-1 min-w-0">
+                                <div className="w-1.5 h-1.5 rounded-full shrink-0" style={{background:task.projects.color||'#007AFF'}}/>
+                                <span className="text-[10px] text-ios-secondary truncate">{task.projects.name}</span>
                               </div>
-                            ) : (
-                              <button onClick={e => { e.stopPropagation(); handleStartTimer(task); }}
-                                className="flex items-center gap-0.5 px-1.5 py-0.5 rounded text-caption2 font-semibold opacity-0 group-hover:opacity-100 bg-blue-50 text-ios-blue">
-                                <Play className="w-2.5 h-2.5" fill="currentColor"/>Start
-                              </button>
+                            )}
+                            {task.comment_count > 0 && (
+                              <div className="flex items-center gap-0.5 text-ios-tertiary shrink-0">
+                                <MessageSquare className="w-3 h-3"/><span className="text-[10px]">{task.comment_count}</span>
+                              </div>
+                            )}
+                            {pri && <div className="w-1.5 h-1.5 rounded-full shrink-0" style={{background:pri.color}} title={pri.label}/>}
+                          </div>
+                          <div className="flex items-center gap-1 shrink-0">
+                            {task.due_date && <span className="text-[10px] text-ios-tertiary">{new Date(task.due_date).toLocaleDateString('en-US',{day:'numeric',month:'short'})}</span>}
+                            {assignee && (
+                              <div className="w-5 h-5 bg-ios-blue rounded-full flex items-center justify-center text-white text-[9px] font-bold shrink-0">
+                                {(assignee.full_name||assignee.email)[0].toUpperCase()}
+                              </div>
                             )}
                           </div>
-                          <div className="flex items-center gap-1.5">
-                            {task.due_date && <span className="text-caption2 text-ios-tertiary">{new Date(task.due_date).toLocaleDateString('en-US',{day:'numeric',month:'short'})}</span>}
-                            {assignee && <div className="w-5 h-5 bg-ios-blue rounded-full flex items-center justify-center text-white text-[9px] font-bold">{(assignee.full_name||assignee.email)[0].toUpperCase()}</div>}
-                          </div>
                         </div>
+
+                        {/* Timer controls on hover */}
+                        {isTimerActive && (
+                          <div className="flex items-center gap-1 mt-1.5" onClick={e=>e.stopPropagation()}>
+                            <button onClick={()=>pauseTimer()} className={`flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-semibold ${isPaused?'bg-blue-50 text-ios-blue':'bg-orange-50 text-ios-orange'}`}>
+                              {isPaused?<><Play className="w-2.5 h-2.5" fill="currentColor"/>Resume</>:<><Pause className="w-2.5 h-2.5" fill="currentColor"/>Pause</>}
+                            </button>
+                            <button onClick={()=>stopTimer()} className="flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-red-50 text-ios-red">
+                              <Square className="w-2.5 h-2.5" fill="currentColor"/><span className="font-mono">{fmtClock(elapsed)}</span>
+                            </button>
+                          </div>
+                        )}
+                        {!isTimerActive && (
+                          <button onClick={e=>{e.stopPropagation();handleStartTimer(task);}}
+                            className="mt-1 w-full flex items-center justify-center gap-0.5 py-0.5 rounded text-[10px] font-semibold opacity-0 group-hover:opacity-100 bg-blue-50 text-ios-blue transition-opacity">
+                            <Play className="w-2.5 h-2.5" fill="currentColor"/>Start timer
+                          </button>
+                        )}
                       </div>
                     );
                   })}
