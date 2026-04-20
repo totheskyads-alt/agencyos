@@ -45,7 +45,7 @@ function StatCard({ label, value, sub, icon: Icon, color }) {
 }
 
 export default function ReportsPage() {
-  const { can, isManager } = useRole();
+  const { can, isAdmin, isManager } = useRole();
   const [range, setRange] = useState('today');
   const [customFrom, setCustomFrom] = useState('');
   const [customTo, setCustomTo] = useState('');
@@ -166,10 +166,10 @@ export default function ReportsPage() {
   });
 
   const SECTIONS = [
-    { key: 'time',     label: '⏱ Time',     show: true },
-    { key: 'costph',   label: '€/hour',     show: isManager },
+    { key: 'time',     label: '⏱ Time',     show: isManager },
+    { key: 'costph',   label: '€/hour',     show: isAdmin },
     { key: 'billing',  label: '💰 Billing',  show: can('canViewBilling') },
-    { key: 'monthly',  label: '📅 Monthly',  show: isManager },
+    { key: 'monthly',  label: '📅 Monthly',  show: isAdmin },
   ];
 
   if (!isManager) {
