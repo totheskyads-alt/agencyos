@@ -832,6 +832,9 @@ export default function TasksPage() {
   let boardTasks = tasks;
   if (mainFilter !== 'all') boardTasks = boardTasks.filter(t => t.assigned_to===mainFilter);
   if (filterProject) boardTasks = boardTasks.filter(t => t.project_id===filterProject);
+  if (filterPriority) boardTasks = boardTasks.filter(t => t.priority===filterPriority);
+  if (filterLabel) boardTasks = boardTasks.filter(t => (taskLabels[t.id]||[]).some(l => l.id===filterLabel));
+  if (search) boardTasks = boardTasks.filter(t => t.title?.toLowerCase().includes(search.toLowerCase()));
   const hasFilters = mainFilter!=='all'||filterProject||filterPriority||filterLabel||search;
 
   return (
@@ -877,12 +880,12 @@ export default function TasksPage() {
       {/* Person switcher for admin/manager */}
       {(role === 'admin' || role === 'manager') && allMembers.length > 1 && (
         <div className="flex items-center gap-2 overflow-x-auto pb-1">
-          <button onClick={() => { setViewingUserId(null); loadBoardColumns(); loadTasks(); }}
+          <button onClick={() => { setViewingUserId(null); loadBoardColumns(currentUser?.id); loadTasks(); }}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-footnote font-semibold whitespace-nowrap transition-all ${!viewingUserId ? 'bg-ios-blue text-white' : 'bg-ios-fill text-ios-secondary hover:bg-ios-fill2'}`}>
             My Board
           </button>
           {allMembers.filter(m => m.id !== currentUser?.id && (role === 'admin' || m.role !== 'admin')).map(m => (
-            <button key={m.id} onClick={() => { setViewingUserId(m.id); }}
+            <button key={m.id} onClick={() => { setViewingUserId(m.id); loadBoardColumns(m.id); loadTasks(); }}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-footnote font-semibold whitespace-nowrap transition-all ${viewingUserId === m.id ? 'bg-ios-blue text-white' : 'bg-ios-fill text-ios-secondary hover:bg-ios-fill2'}`}>
               {m.full_name || m.email}
             </button>
