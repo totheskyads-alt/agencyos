@@ -380,7 +380,17 @@ function TaskDetail({ task, members, boardColumns, projects, labels: allLabels, 
               <div className="flex flex-wrap gap-1.5 mb-2">
                 {taskLabels.map(l => <LabelPill key={l.id} label={l} onRemove={() => toggleLabel(l)} />)}
               </div>
-              <button onClick={() => setShowLabelDrop(!showLabelDrop)}
+              <button onClick={async () => {
+                  if (!task?.id && form.title && form.project_id) {
+                    // Auto-save first so labels can be attached
+                    setLoading(true);
+                    const payload = { ...form, assigned_to: form.assigned_to||null, due_date: form.due_date||null, column_id: form.column_id||boardColumns[0]?.id||null, status:'todo' };
+                    const { data: newTask } = await supabase.from('tasks').insert(payload).select().single();
+                    setLoading(false);
+                    if (newTask) { Object.assign(task, newTask); task.id = newTask.id; }
+                  }
+                  setShowLabelDrop(!showLabelDrop);
+                }}
                 className="flex items-center gap-1.5 text-footnote text-ios-blue hover:bg-blue-50 px-2.5 py-1.5 rounded-ios font-semibold">
                 <Tag className="w-3.5 h-3.5" /> Add label
               </button>
@@ -400,7 +410,7 @@ function TaskDetail({ task, members, boardColumns, projects, labels: allLabels, 
                   ))}
                   <div className="border-t border-ios-separator/30 p-2">
                     {showNewLabel ? (
-                      <div className="space-y-2">
+                      <div className="space-y-2 overflow-y-auto" style={{maxHeight:'calc(100vh - 280px)'}}>
                         <input className="input py-1.5 text-footnote" placeholder="Label name" value={newLabelName} onChange={e => setNewLabelName(e.target.value)} autoFocus />
                         <div className="flex gap-1.5 flex-wrap">{COL_COLORS.map(c => <button key={c} onClick={() => setNewLabelColor(c)} style={{ background: c }} className={`w-5 h-5 rounded-full ${newLabelColor===c ? 'ring-2 ring-offset-1 ring-gray-400' : ''}`} />)}</div>
                         <div className="flex gap-2">
@@ -621,7 +631,10 @@ export default function TasksPage() {
   const [labels, setLabels] = useState([]);
   const [taskLabels, setTaskLabels] = useState({});
   const [currentUser, setCurrentUser] = useState(null);
-  const [mainFilter, setMainFilter] = useState('all');
+  const [mainFilter, setMainFilter] = useState(() => {
+    try { return localStorage.getItem('sm_member_filter') || 'all'; } catch { return 'all'; }
+  });
+  const updateMainFilter = (v) => { setMainFilter(v); try { localStorage.setItem('sm_member_filter', v); } catch {} };
   const [filterProject, setFilterProject] = useState('');
   const [filterLabel, setFilterLabel] = useState('');
   const [filterPriority, setFilterPriority] = useState('');
@@ -630,6 +643,8 @@ export default function TasksPage() {
   const [dragOver, setDragOver] = useState(null);
   const [dragCol, setDragCol] = useState(null);
   const [dragOverCol, setDragOverCol] = useState(null);
+  const [dragTaskId, setDragTaskId] = useState(null);
+  const [dragOverTaskId, setDragOverTaskId] = useState(null);
   const [taskModal, setTaskModal] = useState(null);
   const [newColModal, setNewColModal] = useState(false);
   const [newColName, setNewColName] = useState('');
@@ -835,13 +850,13 @@ export default function TasksPage() {
             </button>
             {showMemberDrop && (
               <div className="absolute top-full left-0 mt-2 bg-white rounded-ios-lg shadow-ios-modal border border-ios-separator/30 py-1 z-50 w-52">
-                <button onClick={() => { setMainFilter('all'); setShowMemberDrop(false); }}
+                <button onClick={() => { updateMainFilter('all'); setShowMemberDrop(false); }}
                   className={`flex items-center gap-2 w-full px-3 py-2.5 text-subhead hover:bg-ios-fill ${mainFilter==='all' ? 'text-ios-blue font-semibold' : 'text-ios-primary'}`}>
                   <Users className="w-4 h-4"/>All members {mainFilter==='all' && <Check className="w-4 h-4 ml-auto"/>}
                 </button>
                 <div className="border-t border-ios-separator/30 my-1"/>
                 {members.map(m => (
-                  <button key={m.id} onClick={() => { setMainFilter(m.id); setShowMemberDrop(false); }}
+                  <button key={m.id} onClick={() => { updateMainFilter(m.id); setShowMemberDrop(false); }}
                     className={`flex items-center gap-2 w-full px-3 py-2.5 text-subhead hover:bg-ios-fill ${mainFilter===m.id ? 'text-ios-blue font-semibold' : 'text-ios-primary'}`}>
                     <div className="w-6 h-6 bg-ios-blue rounded-full flex items-center justify-center text-white text-caption2 font-bold shrink-0">{(m.full_name||m.email)[0].toUpperCase()}</div>
                     <span className="truncate">{m.full_name||m.email}</span>
@@ -869,7 +884,7 @@ export default function TasksPage() {
             {Object.entries(PRIORITY).map(([k,v]) => <option key={k} value={k}>{v.label}</option>)}
           </select>
           {hasFilters && (
-            <button onClick={() => { setMainFilter('all'); setFilterProject(''); setFilterPriority(''); setFilterLabel(''); setSearch(''); }}
+            <button onClick={() => { updateMainFilter('all'); setFilterProject(''); setFilterPriority(''); setFilterLabel(''); setSearch(''); }}
               className="flex items-center gap-1 text-footnote text-ios-red hover:bg-red-50 px-2 py-2 rounded-ios">
               <X className="w-3.5 h-3.5"/> Reset
             </button>
@@ -949,7 +964,7 @@ export default function TasksPage() {
             const isDragTarget = dragOver===col.id;
             return (
               <div key={col.id}
-                className={`shrink-0 w-64 rounded-ios-lg p-3 transition-all ${isDragTarget ? 'bg-blue-50 ring-2 ring-ios-blue' : dragOverCol === col.id && dragCol !== col.id ? 'ring-2 ring-ios-orange ring-dashed' : 'bg-ios-bg'}`}
+                className={`shrink-0 w-64 rounded-ios-lg p-3 transition-all flex flex-col ${isDragTarget ? 'bg-blue-50 ring-2 ring-ios-blue' : dragOverCol === col.id && dragCol !== col.id ? 'ring-2 ring-ios-orange ring-dashed' : 'bg-ios-bg'}`}
                 onDragOver={e => { e.preventDefault(); if (dragCol) setDragOverCol(col.id); else setDragOver(col.id); }}
                 onDragLeave={() => { setDragOver(null); setDragOverCol(null); }}
                 onDrop={e => { if (dragCol) { reorderColumns(dragCol, col.id); setDragCol(null); setDragOverCol(null); } else { handleDrop(e, col.id); } }}>
@@ -968,10 +983,32 @@ export default function TasksPage() {
                     const isTimerActive = activeTimer?.task_id===task.id;
                     return (
                       <div key={task.id} draggable
-                        onDragStart={e => e.dataTransfer.setData('taskId', task.id)}
-                        onDragEnd={() => setDragOver(null)}
+                        onDragStart={e => { e.dataTransfer.setData('taskId', task.id); setDragTaskId(task.id); }}
+                        onDragEnd={() => { setDragOver(null); setDragTaskId(null); setDragOverTaskId(null); }}
+                        onDragOver={e => { e.preventDefault(); e.stopPropagation(); setDragOverTaskId(task.id); }}
+                        onDrop={async e => {
+                          e.preventDefault(); e.stopPropagation();
+                          const srcId = e.dataTransfer.getData('taskId');
+                          if (srcId && srcId !== task.id) {
+                            // Reorder: move src before this task in same column
+                            const colItems = boardTasks.filter(t => t.column_id === col.id);
+                            const srcIdx = colItems.findIndex(t => t.id === srcId);
+                            const dstIdx = colItems.findIndex(t => t.id === task.id);
+                            if (srcIdx !== -1 && dstIdx !== -1) {
+                              const reordered = [...colItems];
+                              const [moved] = reordered.splice(srcIdx, 1);
+                              reordered.splice(dstIdx, 0, moved);
+                              setTasks(prev => {
+                                const others = prev.filter(t => t.column_id !== col.id);
+                                return [...others, ...reordered];
+                              });
+                              await Promise.all(reordered.map((t, i) => supabase.from('tasks').update({ position: i, column_id: col.id }).eq('id', t.id)));
+                            }
+                          }
+                          setDragOverTaskId(null);
+                        }}
                         onClick={() => setTaskModal(task)}
-                        className={`bg-white rounded-ios border p-3 cursor-pointer hover:shadow-ios transition-all select-none group ${isDone ? 'opacity-60' : isTimerActive ? 'border-ios-blue' : 'border-ios-separator/50'}`}>
+                        className={`bg-white rounded-ios border p-3 cursor-pointer hover:shadow-ios transition-all select-none group ${dragOverTaskId === task.id && dragTaskId !== task.id ? 'border-ios-blue border-2 translate-y-0.5' : ''} ${isDone ? 'opacity-60' : isTimerActive ? 'border-ios-blue' : 'border-ios-separator/50'}`}>
                         {labels.length > 0 && (
                           <div className="flex gap-1 flex-wrap mb-2">
                             {labels.slice(0,2).map(l => <span key={l.id} className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full text-white" style={{ background: l.color }}>{l.name}</span>)}
