@@ -116,99 +116,108 @@ export default function DashboardPage() {
   const dayOfWeek = new Date().toLocaleDateString('en-US', { weekday:'long', day:'numeric', month:'long' });
 
   return (
-    <div className="space-y-4 max-w-2xl">
+    <div className="space-y-4">
       {/* Greeting */}
-      <div>
-        <h1 className="text-title2 font-bold text-ios-primary">{greeting()}, {profile?.full_name?.split(' ')[0] || 'there'} 👋</h1>
-        <p className="text-footnote text-ios-secondary">{dayOfWeek}</p>
-      </div>
-
-      {/* Time + today chart — combined card */}
-      <div className="card p-4">
-        <div className="flex items-center justify-between mb-3">
-          <p className="text-subhead font-semibold text-ios-primary">Your time</p>
-          <Link href="/dashboard/timer" className="text-caption1 text-ios-blue font-semibold flex items-center gap-0.5">
-            View all <ArrowRight className="w-3 h-3" />
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-title2 font-bold text-ios-primary">{greeting()}, {profile?.full_name?.split(' ')[0] || 'there'} 👋</h1>
+          <p className="text-footnote text-ios-secondary">{dayOfWeek}</p>
+        </div>
+        <div className="flex gap-3">
+          <Link href="/dashboard/clients" className="card px-4 py-3 text-center hover:shadow-ios-lg transition-shadow">
+            <p className="text-headline font-bold text-ios-orange">{clientCount}</p>
+            <p className="text-caption2 text-ios-secondary">Clients</p>
+          </Link>
+          <Link href="/dashboard/projects" className="card px-4 py-3 text-center hover:shadow-ios-lg transition-shadow">
+            <p className="text-headline font-bold text-ios-green">{projectCount}</p>
+            <p className="text-caption2 text-ios-secondary">Projects</p>
+          </Link>
+          <Link href="/dashboard/tasks" className="card px-4 py-3 text-center hover:shadow-ios-lg transition-shadow">
+            <p className="text-headline font-bold text-ios-purple">{openTasks}</p>
+            <p className="text-caption2 text-ios-secondary">Open tasks</p>
           </Link>
         </div>
-        {/* Time stats row */}
-        <div className="grid grid-cols-3 gap-2 mb-4">
-          {[
-            { label:'Today', secs: todaySecs, color:'text-ios-blue' },
-            { label:'This week', secs: weekSecs, color:'text-ios-purple' },
-            { label:'This month', secs: monthSecs, color:'text-ios-green' },
-          ].map(({ label, secs, color }) => (
-            <div key={label} className="bg-ios-bg rounded-ios p-2.5 text-center">
-              <p className={`text-headline font-bold ${color}`}>{fmtDuration(secs)}</p>
-              <p className="text-caption2 text-ios-secondary">{label}</p>
-            </div>
-          ))}
-        </div>
-        {/* Donut chart */}
-        <DonutChart data={todayByProject} total={todayTotal} size={110} />
       </div>
 
-      {/* This week by project */}
-      {weekByProject.length > 0 && (
-        <div className="card p-4">
-          <p className="text-subhead font-semibold text-ios-primary mb-3">This week</p>
-          <div className="space-y-2.5">
-            {weekByProject.map((p, i) => {
-              const max = Math.max(...weekByProject.map(x => x.secs), 1);
-              return (
-                <div key={i}>
-                  <div className="flex items-center justify-between mb-1">
-                    <div className="flex items-center gap-1.5">
-                      <div className="w-2 h-2 rounded-full" style={{ background: p.color }} />
-                      <span className="text-caption1 font-medium text-ios-primary">{p.name}</span>
-                    </div>
-                    <span className="text-caption2 font-semibold text-ios-secondary">{fmtDuration(p.secs)}</span>
-                  </div>
-                  <div className="h-1.5 bg-ios-fill rounded-full overflow-hidden">
-                    <div className="h-full rounded-full" style={{ width:`${(p.secs/max*100).toFixed(0)}%`, background: p.color }} />
-                  </div>
+      {/* Main 2-col grid */}
+      <div className="grid lg:grid-cols-2 gap-4">
+        {/* LEFT: Time + donut */}
+        <div className="space-y-4">
+          <div className="card p-5">
+            <div className="flex items-center justify-between mb-4">
+              <p className="text-headline font-semibold text-ios-primary">Today's time</p>
+              <Link href="/dashboard/timer" className="text-caption1 text-ios-blue font-semibold flex items-center gap-0.5">
+                View all <ArrowRight className="w-3 h-3" />
+              </Link>
+            </div>
+            <div className="grid grid-cols-3 gap-2 mb-5">
+              {[
+                { label:'Today', secs: todaySecs, color:'text-ios-blue' },
+                { label:'This week', secs: weekSecs, color:'text-ios-purple' },
+                { label:'This month', secs: monthSecs, color:'text-ios-green' },
+              ].map(({ label, secs, color }) => (
+                <div key={label} className="bg-ios-bg rounded-ios p-3 text-center">
+                  <p className={`text-title3 font-bold ${color}`}>{fmtDuration(secs)}</p>
+                  <p className="text-caption2 text-ios-secondary">{label}</p>
                 </div>
-              );
-            })}
+              ))}
+            </div>
+            <DonutChart data={todayByProject} total={todayTotal} size={130} />
           </div>
-        </div>
-      )}
 
-      {/* Stats + recent — side by side */}
-      <div className="grid grid-cols-3 gap-3">
-        <Link href="/dashboard/clients" className="card p-3 text-center hover:shadow-ios-lg transition-shadow">
-          <p className="text-title3 font-bold text-ios-orange">{clientCount}</p>
-          <p className="text-caption2 text-ios-secondary">Clients</p>
-        </Link>
-        <Link href="/dashboard/projects" className="card p-3 text-center hover:shadow-ios-lg transition-shadow">
-          <p className="text-title3 font-bold text-ios-green">{projectCount}</p>
-          <p className="text-caption2 text-ios-secondary">Projects</p>
-        </Link>
-        <Link href="/dashboard/tasks" className="card p-3 text-center hover:shadow-ios-lg transition-shadow">
-          <p className="text-title3 font-bold text-ios-purple">{openTasks}</p>
-          <p className="text-caption2 text-ios-secondary">Open tasks</p>
-        </Link>
-      </div>
-
-      {/* Recent activity */}
-      {recentEntries.length > 0 && (
-        <div className="card">
-          <div className="px-4 py-3 border-b border-ios-separator/30 flex items-center justify-between">
-            <p className="text-subhead font-semibold">Recent activity</p>
-            <Link href="/dashboard/timer" className="text-caption1 text-ios-blue font-semibold">See all</Link>
-          </div>
-          {recentEntries.map(e => (
-            <div key={e.id} className="flex items-center gap-3 px-4 py-2.5 border-b border-ios-separator/20 last:border-0">
-              <div className="w-2 h-2 rounded-full shrink-0" style={{ background: e.projects?.color||'#007AFF' }} />
-              <div className="flex-1 min-w-0">
-                <p className="text-footnote font-medium truncate">{e.projects?.name || 'No project'}</p>
-                {e.description && <p className="text-caption2 text-ios-secondary truncate">{e.description}</p>}
+          {/* This week breakdown */}
+          {weekByProject.length > 0 && (
+            <div className="card p-5">
+              <p className="text-headline font-semibold text-ios-primary mb-4">This week by project</p>
+              <div className="space-y-3">
+                {weekByProject.map((p, i) => {
+                  const max = Math.max(...weekByProject.map(x => x.secs), 1);
+                  return (
+                    <div key={i}>
+                      <div className="flex items-center justify-between mb-1.5">
+                        <div className="flex items-center gap-2">
+                          <div className="w-2.5 h-2.5 rounded-full" style={{ background: p.color }} />
+                          <span className="text-subhead font-medium text-ios-primary">{p.name}</span>
+                        </div>
+                        <span className="text-footnote font-semibold text-ios-secondary">{fmtDuration(p.secs)}</span>
+                      </div>
+                      <div className="h-2 bg-ios-fill rounded-full overflow-hidden">
+                        <div className="h-full rounded-full transition-all" style={{ width:`${(p.secs/max*100).toFixed(0)}%`, background: p.color }} />
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
-              <span className="text-caption1 font-semibold text-ios-secondary shrink-0">{fmtDuration(e.duration_seconds||0)}</span>
+            </div>
+          )}
+        </div>
+
+        {/* RIGHT: Recent activity */}
+        <div className="card">
+          <div className="px-5 py-4 border-b border-ios-separator/30 flex items-center justify-between">
+            <p className="text-headline font-semibold text-ios-primary">Recent activity</p>
+            <Link href="/dashboard/timer" className="text-footnote text-ios-blue font-semibold">See all</Link>
+          </div>
+          {recentEntries.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-16 gap-2">
+              <Clock className="w-8 h-8 text-ios-label4" />
+              <p className="text-subhead text-ios-secondary">No activity yet</p>
+              <p className="text-footnote text-ios-tertiary">Start the timer to track work</p>
+            </div>
+          ) : recentEntries.map(e => (
+            <div key={e.id} className="flex items-center gap-3 px-5 py-3.5 border-b border-ios-separator/20 last:border-0 hover:bg-ios-bg/50 transition-colors">
+              <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: e.projects?.color||'#007AFF' }} />
+              <div className="flex-1 min-w-0">
+                <p className="text-subhead font-medium text-ios-primary truncate">{e.projects?.name || 'No project'}</p>
+                {(e.description || e.projects?.clients?.name) && (
+                  <p className="text-caption1 text-ios-secondary truncate">{e.description || e.projects?.clients?.name}</p>
+                )}
+              </div>
+              <span className="text-footnote font-semibold text-ios-secondary shrink-0">{fmtDuration(e.duration_seconds||0)}</span>
             </div>
           ))}
         </div>
-      )}
+      </div>
     </div>
   );
 }
