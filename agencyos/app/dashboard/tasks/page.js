@@ -580,7 +580,7 @@ function ColHeader({ col, onRename, onDelete, onAdd, onDragStart, onDragEnd }) {
 }
 
 // ─── Task Row ─────────────────────────────────────────────────────────────────
-function TaskRow({ task, members, boardColumns, taskLabels, activeTimer, elapsed, onOpen, onToggleDone, onQuickArchive, onStartTimer, onStopTimer, done }) {
+function TaskRow({ task, members, boardColumns, taskLabels, activeTimer, elapsed, isPaused, onOpen, onToggleDone, onQuickArchive, onStartTimer, onStopTimer, onPauseTimer, done }) {
   const pri = PRIORITY[task.priority];
   const assignee = members.find(m => m.id === task.assigned_to);
   const isOverdue = task.due_date && new Date(task.due_date) < new Date() && !done;
@@ -608,7 +608,7 @@ function TaskRow({ task, members, boardColumns, taskLabels, activeTimer, elapsed
       <div className="flex items-center gap-2 shrink-0">
         {task.comment_count > 0 && <div className="flex items-center gap-0.5 text-ios-tertiary"><MessageSquare className="w-3 h-3" /><span className="text-caption2">{task.comment_count}</span></div>}
         {task.due_date && <span className={`text-caption1 font-medium ${isOverdue ? 'text-ios-red' : 'text-ios-tertiary'}`}>{new Date(task.due_date).toLocaleDateString('en-US',{day:'numeric',month:'short'})}</span>}
-        <QuickTimer task={task} activeTimer={activeTimer} elapsed={elapsed} onStart={onStartTimer} onStop={onStopTimer} />
+        <QuickTimer task={task} activeTimer={activeTimer} elapsed={elapsed} isPaused={isPaused} onStart={onStartTimer} onStop={onStopTimer} onPause={onPauseTimer} />
         {/* Quick archive button */}
         <button onClick={e => { e.stopPropagation(); onQuickArchive(); }}
           className="p-1 rounded text-ios-tertiary hover:text-ios-orange opacity-0 group-hover:opacity-100 transition-opacity"
@@ -948,11 +948,11 @@ export default function TasksPage() {
                         <p className="px-4 py-1.5 text-caption1 font-semibold text-ios-tertiary uppercase tracking-wide">COMPLETED</p>
                         {doneTasks.map(t => (
                           <TaskRow key={t.id} task={t} members={members} boardColumns={boardColumns} taskLabels={taskLabels}
-                            activeTimer={activeTimer} elapsed={elapsed}
+                            activeTimer={activeTimer} elapsed={elapsed} isPaused={isPaused}
                             onOpen={() => setTaskModal(t)}
                             onToggleDone={() => toggleDone(t)}
                             onQuickArchive={() => quickArchive(t.id)}
-                            onStartTimer={handleStartTimer} onStopTimer={stopTimer} done />
+                            onStartTimer={handleStartTimer} onStopTimer={stopTimer} onPauseTimer={pauseTimer} done />
                         ))}
                       </div>
                     )}
@@ -1043,10 +1043,23 @@ export default function TasksPage() {
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-1">
                             {task.comment_count > 0 && <div className="flex items-center gap-0.5 text-ios-tertiary"><MessageSquare className="w-3 h-3"/><span className="text-caption2">{task.comment_count}</span></div>}
-                            <button onClick={e => { e.stopPropagation(); isTimerActive ? stopTimer() : handleStartTimer(task); }}
-                              className={`flex items-center gap-0.5 px-1.5 py-0.5 rounded text-caption2 font-semibold transition-all opacity-0 group-hover:opacity-100 ${isTimerActive ? 'opacity-100 bg-red-50 text-ios-red' : 'bg-blue-50 text-ios-blue'}`}>
-                              {isTimerActive ? <><Square className="w-2.5 h-2.5" fill="currentColor"/>{fmtClock(elapsed)}</> : <><Play className="w-2.5 h-2.5" fill="currentColor"/>Start</>}
-                            </button>
+                            {isTimerActive ? (
+                              <div className="flex items-center gap-1">
+                                <button onClick={e => { e.stopPropagation(); pauseTimer(); }}
+                                  className={`flex items-center gap-0.5 px-1.5 py-0.5 rounded text-caption2 font-semibold ${isPaused ? 'bg-blue-50 text-ios-blue' : 'bg-orange-50 text-ios-orange'}`}>
+                                  {isPaused ? <><Play className="w-2.5 h-2.5" fill="currentColor"/>Res</> : <><Pause className="w-2.5 h-2.5" fill="currentColor"/>Pause</>}
+                                </button>
+                                <button onClick={e => { e.stopPropagation(); stopTimer(); }}
+                                  className="flex items-center gap-0.5 px-1.5 py-0.5 rounded text-caption2 font-semibold bg-red-50 text-ios-red">
+                                  <Square className="w-2.5 h-2.5" fill="currentColor"/><span className="font-mono">{fmtClock(elapsed)}</span>
+                                </button>
+                              </div>
+                            ) : (
+                              <button onClick={e => { e.stopPropagation(); handleStartTimer(task); }}
+                                className="flex items-center gap-0.5 px-1.5 py-0.5 rounded text-caption2 font-semibold opacity-0 group-hover:opacity-100 bg-blue-50 text-ios-blue">
+                                <Play className="w-2.5 h-2.5" fill="currentColor"/>Start
+                              </button>
+                            )}
                           </div>
                           <div className="flex items-center gap-1.5">
                             {task.due_date && <span className="text-caption2 text-ios-tertiary">{new Date(task.due_date).toLocaleDateString('en-US',{day:'numeric',month:'short'})}</span>}
