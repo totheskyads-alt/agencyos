@@ -6,7 +6,7 @@ import { fmtClock, fmtDuration, getElapsed } from '@/lib/utils';
 import { Play, Square, X, Check, ChevronUp, ChevronDown } from 'lucide-react';
 
 export default function GlobalTimer() {
-  const { activeTimer, elapsed, stoppedEntry, startTimer, stopTimer, dismissOverview } = useTimer();
+  const { activeTimer, elapsed, stoppedEntry, isPaused, startTimer, stopTimer, pauseTimer, dismissOverview } = useTimer();
   const [projects, setProjects] = useState([]);
   const [showStart, setShowStart] = useState(false);
   const [selProject, setSelProject] = useState('');
