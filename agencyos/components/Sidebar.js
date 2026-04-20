@@ -3,21 +3,19 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { useRole } from '@/lib/useRole';
-import { LayoutDashboard, Timer, Users, FolderOpen, CheckSquare, BarChart3, UsersRound, LogOut, Menu, X, Receipt, Bug, UserCircle } from 'lucide-react';
+import { LayoutDashboard, Timer, Users, FolderOpen, CheckSquare, BarChart3, UsersRound, LogOut, Menu, X, Receipt, Bug } from 'lucide-react';
 import { useState } from 'react';
-import Image from 'next/image';
 
 const ALL_NAV = [
-  { href: '/dashboard',          icon: LayoutDashboard, label: 'Dashboard',  permission: null },
-  { href: '/dashboard/timer',    icon: Timer,           label: 'Timer',      permission: null },
-  { href: '/dashboard/clients',  icon: Users,           label: 'Clients',    permission: 'canManageClients' },
-  { href: '/dashboard/projects', icon: FolderOpen,      label: 'Projects',   permission: 'canManageProjects' },
-  { href: '/dashboard/tasks',    icon: CheckSquare,     label: 'Tasks',      permission: null },
-  { href: '/dashboard/billing',  icon: Receipt,         label: 'Billing',    permission: 'canViewBilling' },
-  { href: '/dashboard/reports',  icon: BarChart3,       label: 'Reports',    permission: 'canViewReports' },
-  { href: '/dashboard/bugs',     icon: Bug,             label: 'Bug Tracker', permission: null },
-  { href: '/dashboard/profile',   icon: UserCircle,      label: 'My Profile',  permission: null },
-  { href: '/dashboard/team',     icon: UsersRound,      label: 'Team',       permission: 'canManageTeam' },
+  { href: '/dashboard',          icon: LayoutDashboard, label: 'Dashboard',    permission: null },
+  { href: '/dashboard/timer',    icon: Timer,           label: 'Timer',        permission: null },
+  { href: '/dashboard/clients',  icon: Users,           label: 'Clients',      permission: 'canManageClients' },
+  { href: '/dashboard/projects', icon: FolderOpen,      label: 'Projects',     permission: 'canManageProjects' },
+  { href: '/dashboard/tasks',    icon: CheckSquare,     label: 'Tasks',        permission: null },
+  { href: '/dashboard/billing',  icon: Receipt,         label: 'Billing',      permission: 'canViewBilling' },
+  { href: '/dashboard/reports',  icon: BarChart3,       label: 'Reports',      permission: 'canViewReports' },
+  { href: '/dashboard/team',     icon: UsersRound,      label: 'Team',         permission: 'canManageTeam' },
+  { href: '/dashboard/bugs',     icon: Bug,             label: 'Bug Tracker',  permission: null },
 ];
 
 export default function Sidebar({ user, profile }) {
@@ -30,10 +28,10 @@ export default function Sidebar({ user, profile }) {
   const logout = async () => { await supabase.auth.signOut(); router.push('/login'); };
   const initials = (profile?.full_name || user?.email || 'U').split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2);
   const roleBadge = { admin: 'bg-purple-100 text-purple-700', manager: 'bg-blue-100 text-blue-700', operator: 'bg-gray-100 text-gray-500' };
+  const displayName = profile?.nickname || profile?.full_name || 'User';
 
   return (
     <>
-      {/* Mobile top bar */}
       <div className="lg:hidden fixed top-0 left-0 right-0 z-40 bg-white/90 backdrop-blur-ios border-b border-ios-separator/50 px-4 py-3 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <img src="/logo.jpg" alt="Sky Metrics" className="w-8 h-8 rounded-full object-cover" />
@@ -73,17 +71,22 @@ export default function Sidebar({ user, profile }) {
             })}
           </nav>
 
-          {/* User */}
+          {/* User — click to go to profile */}
           <div className="p-3 border-t border-ios-separator/30">
-            <div className="flex items-center gap-3 px-3 py-2.5 rounded-ios bg-ios-fill mb-1">
-              <div className="w-8 h-8 bg-ios-blue rounded-full flex items-center justify-center text-white text-caption1 font-bold shrink-0">{initials}</div>
+            <Link href="/dashboard/profile" onClick={() => setOpen(false)}
+              className={`flex items-center gap-3 px-3 py-2.5 rounded-ios hover:bg-ios-fill transition-colors mb-1 ${pathname === '/dashboard/profile' ? 'bg-ios-fill' : ''}`}>
+              {profile?.avatar_url ? (
+                <img src={profile.avatar_url} alt="avatar" className="w-8 h-8 rounded-full object-cover shrink-0" />
+              ) : (
+                <div className="w-8 h-8 bg-ios-blue rounded-full flex items-center justify-center text-white text-caption1 font-bold shrink-0">{initials}</div>
+              )}
               <div className="flex-1 min-w-0">
-                <p className="text-subhead font-semibold text-ios-primary truncate">{profile?.full_name || 'User'}</p>
+                <p className="text-subhead font-semibold text-ios-primary truncate">{displayName}</p>
                 <span className={`text-caption2 font-semibold px-1.5 py-0.5 rounded-full ${roleBadge[role] || roleBadge.operator}`}>
                   {role?.charAt(0).toUpperCase() + role?.slice(1)}
                 </span>
               </div>
-            </div>
+            </Link>
             <button onClick={logout} className="flex items-center gap-3 w-full px-3.5 py-2.5 rounded-ios text-subhead font-medium text-ios-red hover:bg-red-50 transition-colors">
               <LogOut className="w-4 h-4" /> Sign Out
             </button>
