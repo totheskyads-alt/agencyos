@@ -653,6 +653,8 @@ export default function TasksPage() {
   });
   const updateMainFilter = (v) => { setMainFilter(v); try { localStorage.setItem('sm_member_filter', v); } catch {} };
   const [filterProject, setFilterProject] = useState('');
+  const [viewingUserId, setViewingUserId] = useState(null); // null = own board
+  const [allMembers, setAllMembers] = useState([]);
   const [filterLabel, setFilterLabel] = useState('');
   const [filterPriority, setFilterPriority] = useState('');
   const [search, setSearch] = useState('');
@@ -672,7 +674,7 @@ export default function TasksPage() {
   const memberRef = useRef(null);
 
   const { activeTimer, elapsed, isPaused, startTimer, stopTimer, pauseTimer } = useTimer();
-  const { isManager, profile: userProfile } = useRole();
+  const { isManager, role, profile: userProfile } = useRole();
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data: { user } }) => { setCurrentUser(user); loadTimer(); });
@@ -701,6 +703,8 @@ export default function TasksPage() {
     setBoardColumns(finalCols);
     await loadTasks();
   }
+
+  const currentUserRef = typeof window !== 'undefined' ? window.__currentUserId : null;
 
   async function loadTasks() {
     const { data: { user: currentUser2 } } = await supabase.auth.getUser();
@@ -754,7 +758,7 @@ export default function TasksPage() {
 
   async function addColumn() {
     if (!newColName.trim()) return;
-    const { data } = await supabase.from('task_columns').insert({ name: newColName.trim(), color: newColColor, position: boardColumns.length }).select().single();
+    const { data } = await supabase.from('task_columns').insert({ name: newColName.trim(), color: newColColor, position: boardColumns.length, user_id: currentUser?.id }).select().single();
     if (data) setBoardColumns(p => [...p, data]);
     setNewColModal(false); setNewColName(''); setNewColColor('#007AFF');
   }
@@ -869,6 +873,22 @@ export default function TasksPage() {
           )}
         </div>
       </div>
+
+      {/* Person switcher for admin/manager */}
+      {(role === 'admin' || role === 'manager') && allMembers.length > 1 && (
+        <div className="flex items-center gap-2 overflow-x-auto pb-1">
+          <button onClick={() => { setViewingUserId(null); loadBoardColumns(); loadTasks(); }}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-footnote font-semibold whitespace-nowrap transition-all ${!viewingUserId ? 'bg-ios-blue text-white' : 'bg-ios-fill text-ios-secondary hover:bg-ios-fill2'}`}>
+            My Board
+          </button>
+          {allMembers.filter(m => m.id !== currentUser?.id && (role === 'admin' || m.role !== 'admin')).map(m => (
+            <button key={m.id} onClick={() => { setViewingUserId(m.id); }}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-footnote font-semibold whitespace-nowrap transition-all ${viewingUserId === m.id ? 'bg-ios-blue text-white' : 'bg-ios-fill text-ios-secondary hover:bg-ios-fill2'}`}>
+              {m.full_name || m.email}
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* Filters */}
       {mode !== 'archive' && (
