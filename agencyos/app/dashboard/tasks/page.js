@@ -389,13 +389,22 @@ function TaskDetail({ task, members, boardColumns, projects, labels: allLabels, 
                 {taskLabels.map(l => <LabelPill key={l.id} label={l} onRemove={() => toggleLabel(l)} />)}
               </div>
               <button onClick={async () => {
-                  if (!task?.id && form.title && form.project_id) {
-                    // Auto-save first so labels can be attached
+                  if (isNew) {
+                    if (!form.title.trim() || !form.project_id) {
+                      alert('Please fill in Task Title and Project first, then add labels.');
+                      return;
+                    }
+                    // Auto-save task first
                     setLoading(true);
-                    const payload = { ...form, assigned_to: form.assigned_to||null, due_date: form.due_date||null, column_id: form.column_id||boardColumns[0]?.id||null, status:'todo' };
+                    const payload = { title: form.title.trim(), description: form.description||null, project_id: form.project_id, assigned_to: form.assigned_to||null, due_date: form.due_date||null, column_id: form.column_id||boardColumns[0]?.id||null, priority: form.priority||'medium', status:'todo', position: 0 };
                     const { data: newTask } = await supabase.from('tasks').insert(payload).select().single();
                     setLoading(false);
-                    if (newTask) { Object.assign(task, newTask); task.id = newTask.id; }
+                    if (newTask) {
+                      // Update the task reference so comments/labels work
+                      task = newTask;
+                      onSave(newTask, true); // pass keepOpen=true
+                    }
+                    return;
                   }
                   setShowLabelDrop(!showLabelDrop);
                 }}
@@ -694,19 +703,32 @@ export default function TasksPage() {
   }
 
   async function loadTasks() {
-    const { data: currentProfile } = await supabase.from('profiles').select('role').eq('id', (await supabase.auth.getUser()).data.user?.id || '').single();
-    const isOperator = currentProfile?.role === 'operator';
-    const currentUid = (await supabase.auth.getUser()).data.user?.id;
+    const { data: { user: currentUser2 } } = await supabase.auth.getUser();
+    const currentUid = currentUser2?.id;
+    const { data: currentProfile } = await supabase.from('profiles').select('role').eq('id', currentUid || '').single();
+    const myRole = currentProfile?.role || 'operator';
 
-    let activeQ = supabase.from('tasks').select('*, profiles(full_name,email), projects(id,name,color,clients(name))').eq('is_archived',false).order('position');
-    let archivedQ = supabase.from('tasks').select('*, profiles(full_name,email), projects(id,name,color)').eq('is_archived',true).order('archived_at',{ascending:false}).limit(50);
+    // Get role hierarchy for filtering
+    let activeQ = supabase.from('tasks').select('*, profiles!tasks_assigned_to_fkey(id,full_name,email,role), projects(id,name,color,clients(name))').eq('is_archived',false).order('position');
+    let archivedQ = supabase.from('tasks').select('*, profiles!tasks_assigned_to_fkey(id,full_name,email,role), projects(id,name,color)').eq('is_archived',true).order('archived_at',{ascending:false}).limit(50);
 
-    if (isOperator && currentUid) {
+    // Operator: only own tasks
+    if (myRole === 'operator') {
       activeQ = activeQ.eq('assigned_to', currentUid);
       archivedQ = archivedQ.eq('assigned_to', currentUid);
     }
 
-    const [{ data: active }, { data: archived }] = await Promise.all([activeQ, archivedQ]);
+    const [{ data: activeRaw }, { data: archivedRaw }] = await Promise.all([activeQ, archivedQ]);
+
+    // Manager: filter out tasks assigned to admins
+    let active = activeRaw || [];
+    let archived = archivedRaw || [];
+    if (myRole === 'manager') {
+      const { data: adminIds } = await supabase.from('profiles').select('id').eq('role','admin');
+      const adminSet = new Set((adminIds||[]).map(a => a.id));
+      active = active.filter(t => !adminSet.has(t.assigned_to));
+      archived = archived.filter(t => !adminSet.has(t.assigned_to));
+    }
     const all = [...(active||[]), ...(archived||[])];
     const ids = all.map(t => t.id);
     let cc = {}, tl = {};
