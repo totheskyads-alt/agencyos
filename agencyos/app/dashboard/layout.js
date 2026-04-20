@@ -37,7 +37,7 @@ export default function DashboardLayout({ children }) {
       <div className="flex min-h-screen bg-ios-bg">
         <Sidebar user={user} profile={profile} />
         <main className="flex-1 lg:ml-60 pt-16 lg:pt-0 pb-16 min-h-screen">
-          <div className="p-4 lg:p-6 max-w-7xl mx-auto">
+          <div className="p-4 lg:p-6">
             {children}
           </div>
         </main>
