@@ -1046,7 +1046,7 @@ export default function TasksPage() {
                 <ColHeader col={col}
                   onRename={() => { setEditColModal(col); setEditColName(col.name); }}
                   onDelete={() => deleteColumn(col)}
-                  onAdd={colId => setTaskModal({ column_id: colId, project_id: filterProject||'' })}
+                  onAdd={colId => setTaskModal({ column_id: colId, project_id: filterProject||'', assigned_to: viewingUserId || currentUser?.id || '' })}
                   onDragStart={() => setDragCol(col.id)}
                   onDragEnd={() => { setDragCol(null); setDragOverCol(null); }} />
                 <div className="space-y-2">
@@ -1158,7 +1158,11 @@ export default function TasksPage() {
                       <p className={`text-caption2 font-medium ${isDragTarget ? 'text-ios-blue' : 'text-ios-label4'}`}>Drop tasks here</p>
                     </div>
                   )}
-                  <button onClick={() => setTaskModal({ column_id: col.id, project_id: filterProject||'' })}
+                  <button onClick={() => setTaskModal({
+                      column_id: col.id,
+                      project_id: filterProject||'',
+                      assigned_to: viewingUserId || currentUser?.id || '',
+                    })}
                     className="w-full py-2.5 text-footnote font-semibold text-ios-blue hover:bg-blue-50 border-2 border-ios-blue/30 hover:border-ios-blue rounded-ios flex items-center justify-center gap-1.5 transition-all">
                     <Plus className="w-4 h-4"/> New Task
                   </button>
