@@ -904,7 +904,8 @@ export default function TasksPage() {
       {mode !== 'archive' && (
         <div className="flex items-center gap-2 flex-wrap">
           {/* All members filter — only in list mode */}
-          {mode === 'list' && <div className="relative" ref={memberRef}>
+          {mode === 'list' && (
+          <div className="relative" ref={memberRef}>
             <button onClick={() => setShowMemberDrop(!showMemberDrop)}
               className={`flex items-center gap-2 px-3 py-2 rounded-ios text-subhead font-semibold border transition-all ${mainFilter==='all' ? 'bg-white border-ios-separator text-ios-primary' : 'bg-ios-blue border-ios-blue text-white'}`}>
               {mainFilter==='all' ? <><Users className="w-4 h-4"/>All members</> : <><User className="w-4 h-4"/>{selectedMember?.full_name?.split(' ')[0]}</>}
