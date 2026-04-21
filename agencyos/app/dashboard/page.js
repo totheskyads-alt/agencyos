@@ -82,7 +82,7 @@ export default function DashboardPage() {
       supabase.from('time_entries').select('duration_seconds').eq('user_id',user.id).not('end_time','is',null).gte('created_at',monthStart),
       supabase.from('clients').select('id'),
       supabase.from('projects').select('id').eq('status','active'),
-      supabase.from('tasks').select('id').eq('is_archived',false),
+      supabase.from('tasks').select('id,assigned_to').eq('is_archived',false),
       supabase.from('time_entries').select('duration_seconds,description,projects(name,color,clients(name))').eq('user_id',user.id).not('end_time','is',null).order('created_at',{ascending:false}).limit(5),
     ]);
 
@@ -90,7 +90,18 @@ export default function DashboardPage() {
     setTodaySecs(today);
     setWeekSecs((weekEntFull||[]).reduce((a,e)=>a+(e.duration_seconds||0),0));
     setMonthSecs((monthEnt||[]).reduce((a,e)=>a+(e.duration_seconds||0),0));
-    setClientCount(cli?.length||0); setProjectCount(proj?.length||0); setOpenTasks(tasks?.length||0);
+    setClientCount(cli?.length||0); setProjectCount(proj?.length||0);
+    // Count tasks visible to this user (same logic as tasks page)
+    const { data: myProfile } = await supabase.from('profiles').select('role').eq('id', user.id).single();
+    let taskCount = tasks?.length || 0;
+    if (myProfile?.role === 'operator') {
+      taskCount = (tasks||[]).filter(t => t.assigned_to === user.id).length;
+    } else if (myProfile?.role === 'manager') {
+      const { data: adminIds } = await supabase.from('profiles').select('id').eq('role','admin');
+      const adminSet = new Set((adminIds||[]).map(a => a.id));
+      taskCount = (tasks||[]).filter(t => !adminSet.has(t.assigned_to)).length;
+    }
+    setOpenTasks(taskCount);
     setRecentEntries(recent||[]);
 
     // Today by project
