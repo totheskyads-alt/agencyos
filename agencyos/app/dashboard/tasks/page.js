@@ -677,7 +677,8 @@ export default function TasksPage() {
 
   async function loadAll(targetUserId) {
     const { data: { user: me } } = await supabase.auth.getUser();
-    const uid = targetUserId || me?.id;
+    const myUid = me?.id;
+    const targetUid = targetUserId || myUid;
 
     const [{ data: proj }, { data: mem }, { data: lbl }] = await Promise.all([
       supabase.from('projects').select('*, clients(id,name)').eq('status','active').order('name'),
@@ -687,8 +688,7 @@ export default function TasksPage() {
     setProjects(proj||[]); setMembers(mem||[]); setLabels(lbl||[]);
     setAllMembers(mem||[]);
 
-    // Load columns filtered by user
-    await loadColumnsForUser(uid, me?.id);
+    await loadColumnsForUser(targetUid, myUid);
     await loadTasks();
   }
 
@@ -696,13 +696,12 @@ export default function TasksPage() {
     const uid = targetUid || myUid;
     if (!uid) return;
 
-    // Load ONLY this user's personal columns
-    const { data: personal } = await supabase.from('task_columns')
+    const { data: cols } = await supabase.from('task_columns')
       .select('*').eq('user_id', uid).order('position');
 
-    let finalCols = personal || [];
+    let finalCols = cols || [];
 
-    // If user has no personal columns yet, create defaults for them
+    // Create default columns for this user if none exist
     if (finalCols.length === 0) {
       const { data: created } = await supabase.from('task_columns')
         .insert(DEFAULT_COLS.map((c, i) => ({ ...c, position: i, user_id: uid }))).select();
@@ -763,9 +762,13 @@ export default function TasksPage() {
 
   async function addColumn() {
     if (!newColName.trim()) return;
-    // Personal column for the board being viewed (null = shared)
-    const colUserId = viewingUserId || currentUser?.id || null;
-    const { data } = await supabase.from('task_columns').insert({ name: newColName.trim(), color: newColColor, position: boardColumns.filter(c=>c.user_id===colUserId).length, user_id: colUserId }).select().single();
+    // Column belongs to the board being viewed
+    const colUserId = viewingUserId || currentUser?.id;
+    const { data } = await supabase.from('task_columns').insert({
+      name: newColName.trim(), color: newColColor,
+      position: boardColumns.length,
+      user_id: colUserId
+    }).select().single();
     if (data) setBoardColumns(p => [...p, data]);
     setNewColModal(false); setNewColName(''); setNewColColor('#007AFF');
   }
@@ -836,7 +839,7 @@ export default function TasksPage() {
   });
 
   const selectedMember = members.find(m => m.id===mainFilter);
-  // Board: show tasks for the person whose board is shown
+  // Board: show tasks assigned to the board owner
   const boardOwner = viewingUserId || currentUser?.id;
   let boardTasks = boardOwner ? tasks.filter(t => t.assigned_to === boardOwner) : tasks;
   if (filterProject) boardTasks = boardTasks.filter(t => t.project_id===filterProject);
@@ -1022,10 +1025,12 @@ export default function TasksPage() {
       {mode === 'board' && (
         <div className="flex gap-3 overflow-x-auto pb-6" style={{ minHeight: '65vh' }}>
           {boardColumns.map(col => {
-            const isFirstCol = boardColumns[0]?.id === col.id;
             const knownColIds = new Set(boardColumns.map(c => c.id));
-            const orphanTasks = isFirstCol ? boardTasks.filter(t => !t.column_id || !knownColIds.has(t.column_id)) : [];
-            const colTasks = [...boardTasks.filter(t => t.column_id===col.id), ...orphanTasks];
+            const isFirstCol = boardColumns[0]?.id === col.id;
+            const orphanTasks = isFirstCol
+              ? boardTasks.filter(t => !t.column_id || !knownColIds.has(t.column_id))
+              : [];
+            const colTasks = [...boardTasks.filter(t => t.column_id === col.id), ...orphanTasks];
             const isDragTarget = dragOver===col.id;
             return (
               <div key={col.id}
