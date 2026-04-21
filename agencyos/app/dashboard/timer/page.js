@@ -28,6 +28,10 @@ export default function TimerPage() {
   const [pastForm, setPastForm] = useState({ project_id:'', description:'', date: new Date().toISOString().slice(0,10), start_time:'', duration_minutes:'' });
   const [savingPast, setSavingPast] = useState(false);
   const [pastProjSearch, setPastProjSearch] = useState('');
+  const [showStart, setShowStart] = useState(false);
+  const [startForm, setStartForm] = useState({ project_id: '', description: '' });
+  const [startProjSearch, setStartProjSearch] = useState('');
+  const [startingTimer, setStartingTimer] = useState(false);
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data: { user } }) => { setUser(user); loadData(user); });
@@ -53,21 +57,35 @@ export default function TimerPage() {
 
 
 
-  async function restartFromEntry(entry) {
-    if (!entry.project_id) {
-      alert('Cannot restart: no project assigned to this entry.');
-      return;
-    }
+  function restartFromEntry(entry) {
+    // Open start popup pre-filled — safer than auto-starting
+    const projName = projects.find(p => p.id === entry.project_id)?.name || '';
+    setStartForm({
+      project_id: entry.project_id || '',
+      description: entry.description || entry.tasks?.title || '',
+    });
+    setStartProjSearch(projName);
+    setShowStart(true);
+  }
+
+  async function handleStartTimer() {
+    if (!startForm.project_id || startingTimer) return;
+    setStartingTimer(true);
     try {
       const result = await startTimer({
-        projectId: entry.project_id,
-        taskId: entry.task_id || null,
-        description: entry.description || entry.tasks?.title || null,
+        projectId: startForm.project_id,
+        description: startForm.description || null,
       });
-      if (result) setTimeout(() => loadData(user), 800);
+      if (result) {
+        setShowStart(false);
+        setStartForm({ project_id: '', description: '' });
+        setStartProjSearch('');
+        setTimeout(() => loadData(user), 1000);
+      }
     } catch (err) {
-      console.error('Restart error:', err);
-      alert('Could not restart timer. Please try Start Timer manually.');
+      console.error('Start error:', err);
+    } finally {
+      setStartingTimer(false);
     }
   }
 
@@ -264,6 +282,54 @@ export default function TimerPage() {
         <div className="card p-10 text-center">
           <p className="text-subhead text-ios-secondary">No time entries yet</p>
         </div>
+      )}
+
+      {/* Start Timer Popup */}
+      {showStart && (
+        <Modal title="Start Timer" onClose={() => setShowStart(false)}>
+          <div className="space-y-4">
+            <div>
+              <label className="input-label">Project *</label>
+              <div className="relative">
+                <input className="input" placeholder="Search project..."
+                  value={startForm.project_id ? (projects.find(p=>p.id===startForm.project_id)?.name || startProjSearch) : startProjSearch}
+                  onChange={e => { setStartProjSearch(e.target.value); setStartForm(f=>({...f, project_id:''})); }}
+                  onFocus={() => { if (startForm.project_id) { setStartProjSearch(''); setStartForm(f=>({...f,project_id:''})); }}}
+                  autoFocus
+                />
+                {!startForm.project_id && (
+                  <div className="absolute z-30 w-full bg-white rounded-ios shadow-ios-modal border border-ios-separator/30 max-h-48 overflow-y-auto mt-1">
+                    {projects.filter(p => p.name.toLowerCase().includes(startProjSearch.toLowerCase())).map(p => (
+                      <button key={p.id} onClick={() => { setStartForm(f=>({...f,project_id:p.id})); setStartProjSearch(p.name); }}
+                        className="flex items-center w-full px-3 py-2.5 hover:bg-ios-fill text-left gap-2">
+                        <div className="w-2 h-2 rounded-full" style={{background:p.color||'#007AFF'}} />
+                        <div>
+                          <p className="text-subhead font-medium">{p.name}</p>
+                          {p.clients?.name && <p className="text-caption1 text-ios-secondary">{p.clients.name}</p>}
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+            <div>
+              <label className="input-label">Description (optional)</label>
+              <input className="input" value={startForm.description}
+                onChange={e => setStartForm(f=>({...f,description:e.target.value}))}
+                placeholder="What are you working on?"
+                onKeyDown={e => { if (e.key==='Enter' && startForm.project_id) handleStartTimer(); }}
+              />
+            </div>
+            <div className="flex gap-3 pt-2">
+              <button className="btn-secondary flex-1" onClick={() => setShowStart(false)}>Cancel</button>
+              <button className="btn-primary flex-1 flex items-center justify-center gap-2"
+                onClick={handleStartTimer} disabled={!startForm.project_id || startingTimer}>
+                {startingTimer ? <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"/> : <><Play className="w-4 h-4" fill="white"/>Start</>}
+              </button>
+            </div>
+          </div>
+        </Modal>
       )}
 
       {/* Add past time Modal */}
