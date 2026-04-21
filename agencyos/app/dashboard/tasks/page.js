@@ -1099,28 +1099,34 @@ export default function TasksPage() {
                       <div key={task.id} draggable
                         onDragStart={e => { e.dataTransfer.setData('taskId', task.id); setDragTaskId(task.id); }}
                         onDragEnd={() => { setDragOver(null); setDragTaskId(null); setDragOverTaskId(null); }}
-                        onDragOver={e => { e.preventDefault(); e.stopPropagation(); setDragOverTaskId(task.id); }}
+                        onDragOver={e => { e.preventDefault(); setDragOverTaskId(task.id); }}
                         onDrop={async e => {
-                          e.preventDefault();
+                          e.preventDefault(); e.stopPropagation();
                           const srcId = e.dataTransfer.getData('taskId');
                           if (!srcId || srcId === task.id) { setDragOverTaskId(null); return; }
-                          const srcTask = boardTasks.find(t => t.id === srcId);
-                          if (srcTask?.column_id === col.id) {
+                          const srcTask = tasks.find(t => t.id === srcId);
+                          const targetColId = col.id;
+                          if (srcTask?.column_id === targetColId) {
                             // Same column — reorder
-                            e.stopPropagation();
-                            const colItems = boardTasks.filter(t => t.column_id === col.id);
+                            const colItems = boardTasks.filter(t => t.column_id === targetColId);
                             const srcIdx = colItems.findIndex(t => t.id === srcId);
                             const dstIdx = colItems.findIndex(t => t.id === task.id);
                             if (srcIdx !== -1 && dstIdx !== -1) {
                               const reordered = [...colItems];
                               const [moved] = reordered.splice(srcIdx, 1);
                               reordered.splice(dstIdx, 0, moved);
-                              setTasks(prev => { const others = prev.filter(t => t.column_id !== col.id); return [...others, ...reordered]; });
-                              await Promise.all(reordered.map((t, i) => supabase.from('tasks').update({ position: i, column_id: col.id }).eq('id', t.id)));
+                              setTasks(prev => { const others = prev.filter(t => t.column_id !== targetColId); return [...others, ...reordered]; });
+                              await Promise.all(reordered.map((t, i) => supabase.from('tasks').update({ position: i, column_id: targetColId }).eq('id', t.id)));
                             }
+                          } else {
+                            // Cross-column move — move task here (before this task)
+                            const colItems = boardTasks.filter(t => t.column_id === targetColId);
+                            const dstIdx = colItems.findIndex(t => t.id === task.id);
+                            const insertPos = dstIdx >= 0 ? dstIdx : colItems.length;
+                            setTasks(prev => prev.map(t => t.id === srcId ? { ...t, column_id: targetColId, position: insertPos } : t));
+                            await supabase.from('tasks').update({ column_id: targetColId, position: insertPos }).eq('id', srcId);
                           }
-                          // Cross-column: let bubble to column handler
-                          setDragOverTaskId(null);
+                          setDragOver(null); setDragOverTaskId(null); setDragTaskId(null);
                         }}
                         onClick={() => setTaskModal(task)}
                         className={`bg-white rounded-ios border p-2.5 cursor-pointer hover:shadow-ios transition-all select-none group ${dragOverTaskId === task.id && dragTaskId !== task.id ? 'border-ios-blue border-2' : ''} ${isDone ? 'opacity-50' : isTimerActive ? 'border-ios-blue bg-blue-50/30' : 'border-ios-separator/50'}`}>
@@ -1193,12 +1199,24 @@ export default function TasksPage() {
                       </div>
                     );
                   })}
-                  {colTasks.length === 0 && (
-                    <div className={`h-20 rounded-ios border-2 border-dashed flex flex-col items-center justify-center gap-1 transition-all ${isDragTarget ? 'border-ios-blue bg-blue-50' : 'border-ios-separator/50 opacity-50'}`}>
-                      <Kanban className={`w-4 h-4 ${isDragTarget ? 'text-ios-blue' : 'text-ios-label4'}`} />
-                      <p className={`text-caption2 font-medium ${isDragTarget ? 'text-ios-blue' : 'text-ios-label4'}`}>Drop tasks here</p>
-                    </div>
-                  )}
+                  <div className={`rounded-ios border-2 border-dashed flex flex-col items-center justify-center gap-1 transition-all ${isDragTarget ? 'border-ios-blue bg-blue-50 h-20' : colTasks.length === 0 ? 'h-20 border-ios-separator/50 opacity-50' : 'h-3 border-transparent'}`}
+                    onDragOver={e => { e.preventDefault(); setDragOver(col.id); }}
+                    onDrop={async e => {
+                      e.preventDefault();
+                      const srcId = e.dataTransfer.getData('taskId');
+                      if (srcId) {
+                        setTasks(prev => prev.map(t => t.id === srcId ? { ...t, column_id: col.id, position: colTasks.length } : t));
+                        await supabase.from('tasks').update({ column_id: col.id, position: colTasks.length }).eq('id', srcId);
+                        setDragOver(null); setDragTaskId(null);
+                      }
+                    }}>
+                    {(isDragTarget || colTasks.length === 0) && (
+                      <>
+                        <Kanban className={`w-4 h-4 ${isDragTarget ? 'text-ios-blue' : 'text-ios-label4'}`} />
+                        <p className={`text-caption2 font-medium ${isDragTarget ? 'text-ios-blue' : 'text-ios-label4'}`}>{isDragTarget ? 'Drop here' : 'Drop tasks here'}</p>
+                      </>
+                    )}
+                  </div>
                   <button onClick={() => setTaskModal({
                       column_id: col.id,
                       project_id: filterProject||'',
