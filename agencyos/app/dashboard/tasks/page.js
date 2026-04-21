@@ -693,24 +693,20 @@ export default function TasksPage() {
   }
 
   async function loadColumnsForUser(targetUid, myUid) {
-    // Load shared columns (user_id IS NULL) + personal columns of targetUid
-    const [{ data: shared }, { data: personal }] = await Promise.all([
-      supabase.from('task_columns').select('*').is('user_id', null).order('position'),
-      targetUid
-        ? supabase.from('task_columns').select('*').eq('user_id', targetUid).order('position')
-        : Promise.resolve({ data: [] }),
-    ]);
+    const uid = targetUid || myUid;
+    if (!uid) return;
 
-    // Personal columns override shared if user has any personal ones
-    let finalCols = personal?.length > 0
-      ? [...(shared||[]), ...(personal||[])]
-      : (shared||[]);
+    // Load ONLY this user's personal columns
+    const { data: personal } = await supabase.from('task_columns')
+      .select('*').eq('user_id', uid).order('position');
 
-    // If no cols at all and this is my board, create defaults as shared
-    if (finalCols.length === 0 && (!targetUid || targetUid === myUid)) {
+    let finalCols = personal || [];
+
+    // If user has no personal columns yet, create defaults for them
+    if (finalCols.length === 0) {
       const { data: created } = await supabase.from('task_columns')
-        .insert(DEFAULT_COLS.map((c,i) => ({ ...c, position: i, user_id: null }))).select();
-      finalCols = created||[];
+        .insert(DEFAULT_COLS.map((c, i) => ({ ...c, position: i, user_id: uid }))).select();
+      finalCols = created || [];
     }
     setBoardColumns(finalCols);
   }
@@ -840,8 +836,9 @@ export default function TasksPage() {
   });
 
   const selectedMember = members.find(m => m.id===mainFilter);
-  let boardTasks = tasks;
-  if (mainFilter !== 'all') boardTasks = boardTasks.filter(t => t.assigned_to===mainFilter);
+  // Board: show tasks for the person whose board is shown
+  const boardOwner = viewingUserId || currentUser?.id;
+  let boardTasks = boardOwner ? tasks.filter(t => t.assigned_to === boardOwner) : tasks;
   if (filterProject) boardTasks = boardTasks.filter(t => t.project_id===filterProject);
   if (filterPriority) boardTasks = boardTasks.filter(t => t.priority===filterPriority);
   if (filterLabel) boardTasks = boardTasks.filter(t => (taskLabels[t.id]||[]).some(l => l.id===filterLabel));
@@ -888,27 +885,26 @@ export default function TasksPage() {
         </div>
       </div>
 
-      {/* Board person switcher — admin only, only in board mode */}
-      {role === 'admin' && mode === 'board' && allMembers.length > 1 && (
-        <div className="flex items-center gap-2 overflow-x-auto pb-1">
-          <span className="text-caption1 text-ios-tertiary font-semibold uppercase tracking-wide shrink-0">Board:</span>
-          <button onClick={() => setViewingUserId(null)}
-            className={`px-3 py-1.5 rounded-full text-footnote font-semibold whitespace-nowrap transition-all ${!viewingUserId ? 'bg-ios-blue text-white' : 'bg-ios-fill text-ios-secondary hover:bg-ios-fill2'}`}>
-            My Board
-          </button>
-          {allMembers.filter(m => m.id !== currentUser?.id).map(m => (
-            <button key={m.id} onClick={() => setViewingUserId(m.id)}
-              className={`px-3 py-1.5 rounded-full text-footnote font-semibold whitespace-nowrap transition-all ${viewingUserId === m.id ? 'bg-ios-blue text-white' : 'bg-ios-fill text-ios-secondary hover:bg-ios-fill2'}`}>
-              {m.full_name?.split(' ')[0] || m.email}
-            </button>
-          ))}
+      {/* Board mode: person switcher — only way to switch, admin only */}
+      {mode === 'board' && role === 'admin' && allMembers.length > 1 && (
+        <div className="flex items-center gap-2 overflow-x-auto pb-1 -mt-1">
+          {[{ id: null, label: 'My Board', isMe: true }, ...allMembers.filter(m => m.id !== currentUser?.id).map(m => ({ id: m.id, label: m.full_name?.split(' ')[0] || m.email, isMe: false }))].map(item => {
+            const active = item.id === null ? !viewingUserId : viewingUserId === item.id;
+            return (
+              <button key={item.id || 'me'} onClick={() => setViewingUserId(item.id)}
+                className={`px-3.5 py-1.5 rounded-full text-footnote font-semibold whitespace-nowrap transition-all ${active ? 'bg-ios-blue text-white shadow-ios-sm' : 'bg-ios-fill text-ios-secondary hover:bg-ios-fill2'}`}>
+                {item.label}
+              </button>
+            );
+          })}
         </div>
       )}
 
       {/* Filters */}
       {mode !== 'archive' && (
         <div className="flex items-center gap-2 flex-wrap">
-          <div className="relative" ref={memberRef}>
+          {/* All members filter — only in list mode */}
+          {mode === 'list' && <div className="relative" ref={memberRef}>
             <button onClick={() => setShowMemberDrop(!showMemberDrop)}
               className={`flex items-center gap-2 px-3 py-2 rounded-ios text-subhead font-semibold border transition-all ${mainFilter==='all' ? 'bg-white border-ios-separator text-ios-primary' : 'bg-ios-blue border-ios-blue text-white'}`}>
               {mainFilter==='all' ? <><Users className="w-4 h-4"/>All members</> : <><User className="w-4 h-4"/>{selectedMember?.full_name?.split(' ')[0]}</>}
