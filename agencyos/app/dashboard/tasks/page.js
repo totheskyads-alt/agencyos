@@ -675,13 +675,8 @@ export default function TasksPage() {
       loadTimer();
     });
     loadAll();
-    // Poll every 15s — reload tasks AND restore columns for current viewing user
-    const interval = setInterval(async () => {
-      await loadTasks();
-      const uid = viewingUserIdRef.current || currentUserRef2.current?.id;
-      const myUid = currentUserRef2.current?.id;
-      if (uid && myUid) loadColumnsForUser(uid, myUid);
-    }, 15000);
+    // Poll every 15s — reload tasks only (columns don't change)
+    const interval = setInterval(() => loadTasks(), 15000);
     const onStorage = (e) => { if (e.key === 'sm_tasks_updated') loadTasks(); };
     window.addEventListener('storage', onStorage);
     return () => { clearInterval(interval); window.removeEventListener('storage', onStorage); };
@@ -838,11 +833,7 @@ export default function TasksPage() {
     if (!confirm('Delete task permanently?')) return;
     await supabase.from('tasks').delete().eq('id', taskId);
     setTaskModal(null);
-    await loadTasks();
-    // Restore columns for currently viewed board (in case they reset)
-    const uid = viewingUserIdRef.current || currentUserRef2.current?.id;
-    const myUid = currentUserRef2.current?.id;
-    if (uid && myUid) await loadColumnsForUser(uid, myUid);
+    loadTasks();
     try { localStorage.setItem('sm_tasks_updated', Date.now().toString()); } catch {}
   }
 
