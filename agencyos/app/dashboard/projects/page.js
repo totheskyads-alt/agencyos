@@ -100,6 +100,17 @@ export default function ProjectsPage() {
   async function addInvoice() {
     if (!invForm.amount || !selected) return;
     setLoading(true);
+    // Save to billing table (main billing section) with project's client
+    const payload = {
+      client_id: selected.client_id,
+      amount: parseFloat(invForm.amount),
+      month: parseInt(invForm.month),
+      year: parseInt(invForm.year),
+      status: 'draft',
+      invoice_number: `INV-${selected.clients?.name?.slice(0,3).toUpperCase()}-${invForm.year}-${String(invForm.month).padStart(2,'0')}`,
+    };
+    await supabase.from('billing').insert(payload);
+    // Also save to invoices for project history
     await supabase.from('invoices').upsert({ project_id: selected.id, month: parseInt(invForm.month), year: parseInt(invForm.year), amount: parseFloat(invForm.amount) }, { onConflict:'project_id,month,year' });
     await loadInvoices(selected.id);
     setInvForm({...invForm, amount:''});
@@ -148,47 +159,71 @@ export default function ProjectsPage() {
         </div>
       </div>
 
-      {/* Projects list */}
+      {/* Projects grouped by client */}
       {filtered.length === 0 ? (
         <div className="card p-12 text-center">
           <FolderOpen className="w-8 h-8 text-ios-label4 mx-auto mb-3" />
           <p className="text-headline font-semibold text-ios-secondary mb-4">{activeTab === 'active' ? 'No active projects' : 'No archived projects'}</p>
           {activeTab === 'active' && <button onClick={openAdd} className="btn-primary">New Project</button>}
         </div>
-      ) : (
-        <div className="card">
-          {filtered.map(p => (
-            <div key={p.id} className="list-row hover:bg-ios-bg transition-colors cursor-pointer" onClick={() => openEdit(p)}>
-              <div className="w-3 h-3 rounded-full shrink-0 mr-3" style={{background:p.color}}/>
-              <div className="flex-1 min-w-0">
-                <p className="text-subhead font-semibold text-ios-primary">{p.name}</p>
-                <div className="flex gap-3 flex-wrap">
-                  <p className={`text-footnote ${!p.client_id ? 'text-ios-red font-semibold' : 'text-ios-secondary'}`}>
-                    {p.clients?.name || '⚠️ No client!'}
-                  </p>
-                  {p.billing_day && <p className="text-footnote text-ios-tertiary">· Day {p.billing_day}</p>}
-                  {p.monthly_amount && isAdmin && <p className="text-footnote text-ios-green font-semibold">· {fmtCurrency(p.monthly_amount)}/mo</p>}
+      ) : (() => {
+        // Group by client
+        const grouped = {};
+        filtered.forEach(p => {
+          const key = p.client_id || '__none__';
+          const label = p.clients?.name || '⚠️ No client';
+          if (!grouped[key]) grouped[key] = { label, projects: [] };
+          grouped[key].projects.push(p);
+        });
+        return (
+          <div className="space-y-4">
+            {Object.entries(grouped).map(([clientId, group]) => (
+              <div key={clientId} className="card overflow-hidden">
+                <div className="px-4 py-2.5 bg-ios-bg border-b border-ios-separator/30 flex items-center gap-2">
+                  <span className="text-footnote font-bold text-ios-secondary uppercase tracking-wide">{group.label}</span>
+                  <span className="text-caption2 text-ios-tertiary">({group.projects.length})</span>
+                  {/* Bug #31: link to tasks filtered by client */}
+                  <a href={`/dashboard/tasks?client=${clientId}`}
+                    className="ml-auto text-caption1 text-ios-blue font-semibold hover:underline">
+                    View tasks →
+                  </a>
                 </div>
+                {group.projects.map(p => (
+                  <div key={p.id} className="list-row hover:bg-ios-bg transition-colors cursor-pointer" onClick={() => openEdit(p)}>
+                    <div className="w-3 h-3 rounded-full shrink-0 mr-3" style={{background:p.color}}/>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-subhead font-semibold text-ios-primary">{p.name}</p>
+                      <div className="flex gap-3 flex-wrap">
+                        {p.billing_day && <p className="text-footnote text-ios-tertiary">Day {p.billing_day}</p>}
+                        {p.monthly_amount && isAdmin && <p className="text-footnote text-ios-green font-semibold">{fmtCurrency(p.monthly_amount)}/mo</p>}
+                        {stats[p.id] > 0 && <p className="text-footnote text-ios-secondary">{fmtDuration(stats[p.id])} tracked</p>}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0" onClick={e => e.stopPropagation()}>
+                      {/* Bug #31: link to tasks for this project */}
+                      <a href={`/dashboard/tasks?project=${p.id}`} onClick={e => e.stopPropagation()}
+                        className="flex items-center gap-1 px-2.5 py-1.5 rounded-ios bg-ios-fill text-ios-secondary text-caption1 font-semibold hover:bg-ios-fill2">
+                        Tasks →
+                      </a>
+                      {isAdmin && (
+                        <button onClick={e => openInvoices(p, e)}
+                          className="flex items-center gap-1 px-2.5 py-1.5 rounded-ios bg-green-50 text-ios-green text-caption1 font-semibold hover:bg-green-100">
+                          <Euro className="w-3 h-3"/>Invoice
+                        </button>
+                      )}
+                      <button onClick={e => toggleArchive(p, e)}
+                        className={`flex items-center gap-1 px-2.5 py-1.5 rounded-ios text-caption1 font-semibold ${p.status==='active' ? 'bg-ios-fill text-ios-secondary hover:bg-ios-fill2' : 'bg-blue-50 text-ios-blue hover:bg-blue-100'}`}>
+                        <Archive className="w-3 h-3"/>
+                        {p.status==='active' ? 'Archive' : 'Restore'}
+                      </button>
+                    </div>
+                  </div>
+                ))}
               </div>
-              <div className="flex items-center gap-2 shrink-0" onClick={e => e.stopPropagation()}>
-                {stats[p.id] > 0 && <span className="text-footnote text-ios-secondary">{fmtDuration(stats[p.id])}</span>}
-                {isAdmin && (
-                  <button onClick={e => openInvoices(p, e)}
-                    className="flex items-center gap-1 px-2.5 py-1.5 rounded-ios bg-green-50 text-ios-green text-caption1 font-semibold hover:bg-green-100">
-                    <Euro className="w-3 h-3"/>Invoices
-                  </button>
-                )}
-                <button onClick={e => toggleArchive(p, e)}
-                  className={`flex items-center gap-1 px-2.5 py-1.5 rounded-ios text-caption1 font-semibold ${p.status==='active' ? 'bg-ios-fill text-ios-secondary hover:bg-ios-fill2' : 'bg-blue-50 text-ios-blue hover:bg-blue-100'}`}
-                  title={p.status==='active' ? 'Archive project' : 'Restore project'}>
-                  <Archive className="w-3 h-3"/>
-                  {p.status==='active' ? 'Archive' : 'Restore'}
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
+            ))}
+          </div>
+        );
+      })()}
 
       {/* Project Modal */}
       {modal && (
