@@ -888,13 +888,18 @@ export default function TasksPage() {
         </div>
       </div>
 
-      {/* Board mode: person switcher — only way to switch, admin only */}
+      {/* Board mode: person switcher — admin only */}
       {mode === 'board' && role === 'admin' && allMembers.length > 1 && (
         <div className="flex items-center gap-2 overflow-x-auto pb-1 -mt-1">
-          {[{ id: null, label: 'My Board', isMe: true }, ...allMembers.filter(m => m.id !== currentUser?.id).map(m => ({ id: m.id, label: m.full_name?.split(' ')[0] || m.email, isMe: false }))].map(item => {
-            const active = item.id === null ? !viewingUserId : viewingUserId === item.id;
+          {[{ id: currentUser?.id, label: 'My Board' }, ...allMembers.filter(m => m.id !== currentUser?.id).map(m => ({ id: m.id, label: m.full_name?.split(' ')[0] || m.email }))].map(item => {
+            const effectiveViewing = viewingUserId || currentUser?.id;
+            const active = effectiveViewing === item.id;
             return (
-              <button key={item.id || 'me'} onClick={() => setViewingUserId(item.id)}
+              <button key={item.id} onClick={async () => {
+                  setViewingUserId(item.id === currentUser?.id ? null : item.id);
+                  await loadColumnsForUser(item.id, currentUser?.id);
+                  await loadTasks();
+                }}
                 className={`px-3.5 py-1.5 rounded-full text-footnote font-semibold whitespace-nowrap transition-all ${active ? 'bg-ios-blue text-white shadow-ios-sm' : 'bg-ios-fill text-ios-secondary hover:bg-ios-fill2'}`}>
                 {item.label}
               </button>
