@@ -383,11 +383,11 @@ function TaskDetail({ task, members, boardColumns, projects, labels: allLabels, 
           </div>
 
           {/* Labels */}
-          {task?.id && (
+          {(
             <div ref={labelRef} className="relative">
               <label className="input-label">Labels</label>
               <div className="flex flex-wrap gap-1.5 mb-2">
-                {taskLabels.map(l => <LabelPill key={l.id} label={l} onRemove={() => toggleLabel(l)} />)}
+                {(isNew ? pendingLabels : taskLabels).map(l => <LabelPill key={l.id} label={l} onRemove={() => { if (isNew) setPendingLabels(p=>p.filter(x=>x.id!==l.id)); else toggleLabel(l); }} />)}
               </div>
               <button onClick={() => setShowLabelDrop(!showLabelDrop)}
                 className="flex items-center gap-1.5 text-footnote text-ios-blue hover:bg-blue-50 px-2.5 py-1.5 rounded-ios font-semibold">
@@ -410,7 +410,7 @@ function TaskDetail({ task, members, boardColumns, projects, labels: allLabels, 
                         <span className="w-3 h-3 rounded-full" style={{ background: l.color }} />
                         <span className="text-subhead">{l.name}</span>
                       </span>
-                      {taskLabels.some(tl => tl.id===l.id) && <Check className="w-4 h-4 text-ios-blue" />}
+                      {(isNew ? pendingLabels : taskLabels).some(tl => tl.id===l.id) && <Check className="w-4 h-4 text-ios-blue" />}
                     </button>
                   ))}
                   <div className="border-t border-ios-separator/30 p-2">
