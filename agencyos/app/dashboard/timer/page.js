@@ -18,7 +18,7 @@ function fmtDateGroup(dateStr) {
 }
 
 export default function TimerPage() {
-  const { activeTimer, elapsed, stopTimer } = useTimer();
+  const { activeTimer, elapsed, isPaused, startTimer, stopTimer, pauseTimer } = useTimer();
   const [projects, setProjects] = useState([]);
   const [entries, setEntries] = useState([]);
   const [user, setUser] = useState(null);
@@ -72,19 +72,12 @@ export default function TimerPage() {
   }
 
   async function restartFromEntry(entry) {
-    // Start a new timer with same project + description
-    const { data } = await supabase.from('time_entries').insert({
-      user_id: user.id,
-      project_id: entry.project_id,
+    const result = await startTimer({
+      projectId: entry.project_id,
+      taskId: entry.task_id || null,
       description: entry.description || entry.tasks?.title || null,
-      task_id: entry.task_id || null,
-      start_time: new Date().toISOString(),
-    }).select('*, projects(name,color), tasks(title)').single();
-    if (data) {
-      // Reload page to sync timer context
-      window.dispatchEvent(new Event('timer-restart'));
-      loadData(user);
-    }
+    });
+    if (result) setTimeout(() => loadData(user), 500);
   }
 
   async function saveEdit(entry) {
@@ -110,12 +103,18 @@ export default function TimerPage() {
     if (!pastForm.project_id || !pastForm.duration_minutes || !user) return;
     setSavingPast(true);
     const secs = Math.round(parseFloat(pastForm.duration_minutes) * 60);
-    const startTime = new Date(`${pastForm.date}T${pastForm.start_time || '09:00'}:00`).toISOString();
-    const endTime = new Date(new Date(startTime).getTime() + secs * 1000).toISOString();
+    // Use local time to avoid timezone shifting the date
+    const timeStr = pastForm.start_time || '09:00';
+    const localStr = `${pastForm.date}T${timeStr}:00`;
+    const startTime = new Date(localStr + (localStr.includes('Z') ? '' : '')).toISOString();
+    // Force the date to stay correct: create in local time
+    const d = new Date(pastForm.date + 'T' + timeStr + ':00');
+    const startTime2 = new Date(d.getTime()).toISOString();
+    const endTime = new Date(d.getTime() + secs * 1000).toISOString();
     await supabase.from('time_entries').insert({
       user_id: user.id, project_id: pastForm.project_id,
       description: pastForm.description || null,
-      start_time: startTime, end_time: endTime, duration_seconds: secs,
+      start_time: startTime2, end_time: endTime, duration_seconds: secs,
     });
     setShowPast(false);
     setPastForm({ project_id:'', description:'', date: new Date().toISOString().slice(0,10), start_time:'', duration_minutes:'' });
