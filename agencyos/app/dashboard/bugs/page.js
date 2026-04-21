@@ -19,7 +19,19 @@ export default function BugsPage() {
   const [editingIdeaId, setEditingIdeaId] = useState(null);
   const [submitted, setSubmitted] = useState('');
 
-  useEffect(() => { load(); }, []);
+  const [currentUserId, setCurrentUserId] = useState('');
+  const [currentUserName, setCurrentUserName] = useState('');
+
+  useEffect(() => {
+    load();
+    supabase.auth.getUser().then(async ({ data: { user } }) => {
+      if (user) {
+        setCurrentUserId(user.id);
+        const { data: p } = await supabase.from('profiles').select('full_name,nickname').eq('id', user.id).single();
+        setCurrentUserName(p?.nickname || p?.full_name || user.email);
+      }
+    });
+  }, []);
   useEffect(() => {
     try { localStorage.setItem('sm_bug_draft', JSON.stringify(form)); } catch {}
   }, [form]);
@@ -40,7 +52,7 @@ export default function BugsPage() {
       await supabase.from('bugs').update(payload).eq('id', editingId);
       setEditingId(null);
     } else {
-      await supabase.from('bugs').insert({ ...payload, status: 'open' });
+      await supabase.from('bugs').insert({ ...payload, status: 'open', reported_by: currentUserId });
     }
     const empty = EMPTY_BUG;
     setForm(empty);
@@ -55,7 +67,7 @@ export default function BugsPage() {
       await supabase.from('ideas').update({ title: ideaForm.title, description: ideaForm.description, priority: ideaForm.priority }).eq('id', editingIdeaId);
       setEditingIdeaId(null);
     } else {
-      await supabase.from('ideas').insert({ title: ideaForm.title, description: ideaForm.description, priority: ideaForm.priority, status: 'open' });
+      await supabase.from('ideas').insert({ title: ideaForm.title, description: ideaForm.description, priority: ideaForm.priority, status: 'open', reported_by: currentUserId });
     }
     setIdeaForm(EMPTY_IDEA);
     setSubmitted('idea'); setTimeout(() => setSubmitted(''), 3000);
@@ -146,6 +158,7 @@ export default function BugsPage() {
                       <span className="text-caption2 text-ios-blue font-semibold">{b.environment}</span>
                     </div>
                     <p className="text-subhead font-semibold">{b.title}</p>
+                    {b.reporter_name && <p className="text-caption1 text-ios-tertiary">by {b.reporter_name}</p>}
                     {b.description && <p className="text-footnote text-ios-secondary mt-0.5 line-clamp-2">{b.description}</p>}
                   </div>
                   <div className="flex gap-1.5 shrink-0">
