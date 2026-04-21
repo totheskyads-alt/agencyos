@@ -202,20 +202,11 @@ function TaskDetail({ task, members, boardColumns, projects, labels: allLabels, 
     if (newProjClientId) payload.client_id = newProjClientId;
     const { data } = await supabase.from('projects').insert(payload).select('*, clients(name)').single();
     if (data) {
-      // Add new project to list immediately, then refresh from DB
-      const newProj = { ...data };
-      setProjects(prev => {
-        const updated = [...prev.filter(p => p.id !== data.id), newProj];
-        return updated.sort((a,b) => a.name.localeCompare(b.name));
-      });
-      // Set in form directly
+      setProjects(prev => [...prev, data].sort((a,b) => a.name.localeCompare(b.name)));
       setForm(p => ({ ...p, project_id: data.id }));
-      // Also refresh from DB in background
-      supabase.from('projects').select('*, clients(id,name)').eq('status','active').order('name')
-        .then(({ data: fresh }) => { if (fresh) setProjects(fresh); });
+      setShowProjDrop(false);
     }
     setShowNewProj(false);
-    setShowProjDrop(false);
     setNewProjName('');
     setNewProjClientId('');
   }
@@ -899,7 +890,7 @@ export default function TasksPage() {
       <div className="flex items-center justify-between gap-3">
         <div>
           <h1 className="text-title2 font-bold text-ios-primary">{mode==='archive' ? 'Archive' : 'Tasks'}</h1>
-          <p className="text-subhead text-ios-secondary">{mode==='archive' ? `${archivedTasks.length} archived` : hasFilters ? `${visible.length} of ${tasks.length} tasks` : `${tasks.length} tasks`}</p>
+          <p className="text-subhead text-ios-secondary">{mode==='archive' ? `${archivedTasks.length} archived` : hasFilters ? `${visible.length} of ${tasks.length}` : `${tasks.length} tasks`}</p>
         </div>
         <div className="flex items-center gap-2 shrink-0">
           {/* View toggle */}
