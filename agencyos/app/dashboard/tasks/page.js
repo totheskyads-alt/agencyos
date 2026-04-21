@@ -530,8 +530,10 @@ function TaskDetail({ task, members, boardColumns, projects, labels: allLabels, 
               <button onClick={() => fileRef.current?.click()} className="p-2 rounded-ios hover:bg-ios-fill text-ios-tertiary hover:text-ios-blue" title="Attach file">
                 <Paperclip className="w-4 h-4" />
               </button>
-              <input className="input flex-1 resize-none" style={{whiteSpace:"pre-wrap",wordBreak:"break-word"}} placeholder="Add comment... (Enter to send)"
+              <textarea className="input flex-1 resize-none" rows={1} placeholder="Add comment... (Enter to send)"
                 value={newComment} onChange={e => setNewComment(e.target.value)}
+                style={{minHeight:'38px', maxHeight:'120px', overflowY:'auto'}}
+                onInput={e => { e.target.style.height='auto'; e.target.style.height=e.target.scrollHeight+'px'; }}
                 onKeyDown={e => { if (e.key==='Enter' && !e.shiftKey) { e.preventDefault(); addComment(); }}} />
               <button onClick={addComment} disabled={(!newComment.trim() && !commentFile) || sending} className="btn-primary px-3">
                 {sending ? <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : <Send className="w-4 h-4" />}
