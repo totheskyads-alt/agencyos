@@ -47,26 +47,11 @@ export default function TimerPage() {
   }
 
   async function handleStop() {
-    setIsPaused(false); setPausedAt(null); setPauseSeconds(0);
     await stopTimer();
     if (user) setTimeout(() => loadData(user), 600);
   }
 
-  async function handlePause() {
-    if (!activeTimer) return;
-    if (isPaused) {
-      // Resume
-      const pauseDur = Math.round((Date.now() - pausedAt) / 1000);
-      const newPauseTotal = pauseSeconds + pauseDur;
-      setPauseSeconds(newPauseTotal);
-      setPausedAt(null); setIsPaused(false);
-      await supabase.from('time_entries').update({ pause_seconds: newPauseTotal }).eq('id', activeTimer.id);
-    } else {
-      // Pause
-      setPausedAt(Date.now()); setIsPaused(true);
-      await supabase.from('time_entries').update({ paused_at: new Date().toISOString() }).eq('id', activeTimer.id);
-    }
-  }
+
 
   async function restartFromEntry(entry) {
     const result = await startTimer({
@@ -126,7 +111,7 @@ export default function TimerPage() {
   }, {});
 
   const todayTotal = (grouped['Today']||[]).reduce((a,e) => a+(e.duration_seconds||0), 0);
-  const effectiveElapsed = isPaused ? Math.max(0, elapsed - (pausedAt ? Math.round((Date.now()-pausedAt)/1000) : 0) - pauseSeconds) : Math.max(0, elapsed - pauseSeconds);
+  const effectiveElapsed = elapsed; // context already applies pause offset
 
   return (
     <div className="space-y-4">
