@@ -669,6 +669,11 @@ export default function TasksPage() {
   useEffect(() => {
     supabase.auth.getUser().then(({ data: { user } }) => { setCurrentUser(user); loadTimer(); });
     loadAll();
+    // Poll every 15s + listen for cross-tab updates
+    const interval = setInterval(() => loadTasks(), 15000);
+    const onStorage = (e) => { if (e.key === 'sm_tasks_updated') loadTasks(); };
+    window.addEventListener('storage', onStorage);
+    return () => { clearInterval(interval); window.removeEventListener('storage', onStorage); };
   }, []);
 
   useEffect(() => {
@@ -821,7 +826,7 @@ export default function TasksPage() {
   async function deleteTask(taskId) {
     if (!confirm('Delete task permanently?')) return;
     await supabase.from('tasks').delete().eq('id', taskId);
-    setTaskModal(null); loadTasks();
+    setTaskModal(null); loadTasks(); try { localStorage.setItem('sm_tasks_updated', Date.now().toString()); } catch {}
   }
 
   async function handleStartTimer(task) { await startTimer({ projectId: task.project_id, taskId: task.id, description: task.title }); }
