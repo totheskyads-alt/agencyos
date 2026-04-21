@@ -202,10 +202,11 @@ function TaskDetail({ task, members, boardColumns, projects, labels: allLabels, 
     if (newProjClientId) payload.client_id = newProjClientId;
     const { data } = await supabase.from('projects').insert(payload).select('*, clients(name)').single();
     if (data) {
-      // Reload full projects list from DB
       const { data: freshProjects } = await supabase.from('projects').select('*, clients(id,name)').eq('status','active').order('name');
       if (freshProjects) setProjects(freshProjects);
+      // Auto-select the new project in the form
       setForm(p => ({ ...p, project_id: data.id }));
+      setShowProjDrop(false);
     }
     setShowNewProj(false); setNewProjName(''); setNewProjClientId('');
   }
@@ -1150,9 +1151,9 @@ export default function TasksPage() {
                                 <MessageSquare className="w-3 h-3"/><span className="text-[10px]">{task.comment_count}</span>
                               </div>
                             )}
-                            {pri && pri.label !== 'Medium' && (
-              <span className="text-[9px] font-bold px-1 py-0.5 rounded" style={{background:pri.color+'20', color:pri.color}}>{pri.label}</span>
-            )}
+                            {pri && pri.label !== 'medium' && pri.label !== 'Medium' && (
+                              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full" style={{background:pri.color, color:'white'}}>{pri.label}</span>
+                            )}
                           </div>
                           <div className="flex items-center gap-1 shrink-0">
                             {task.due_date && <span className="text-[10px] text-ios-tertiary">{new Date(task.due_date).toLocaleDateString('en-US',{day:'numeric',month:'short'})}</span>}
