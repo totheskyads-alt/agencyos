@@ -54,12 +54,21 @@ export default function TimerPage() {
 
 
   async function restartFromEntry(entry) {
-    const result = await startTimer({
-      projectId: entry.project_id,
-      taskId: entry.task_id || null,
-      description: entry.description || entry.tasks?.title || null,
-    });
-    if (result) setTimeout(() => loadData(user), 500);
+    if (!entry.project_id) {
+      alert('Cannot restart: no project assigned to this entry.');
+      return;
+    }
+    try {
+      const result = await startTimer({
+        projectId: entry.project_id,
+        taskId: entry.task_id || null,
+        description: entry.description || entry.tasks?.title || null,
+      });
+      if (result) setTimeout(() => loadData(user), 800);
+    } catch (err) {
+      console.error('Restart error:', err);
+      alert('Could not restart timer. Please try Start Timer manually.');
+    }
   }
 
   async function saveEdit(entry) {
