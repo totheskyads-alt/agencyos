@@ -903,34 +903,32 @@ export default function TasksPage() {
       {/* Filters */}
       {mode !== 'archive' && (
         <div className="flex items-center gap-2 flex-wrap">
-          {/* All members filter — only in list mode */}
           {mode === 'list' && (
-          <>
-          <div className="relative" ref={memberRef}>
-            <button onClick={() => setShowMemberDrop(!showMemberDrop)}
-              className={`flex items-center gap-2 px-3 py-2 rounded-ios text-subhead font-semibold border transition-all ${mainFilter==='all' ? 'bg-white border-ios-separator text-ios-primary' : 'bg-ios-blue border-ios-blue text-white'}`}>
-              {mainFilter==='all' ? <><Users className="w-4 h-4"/>All members</> : <><User className="w-4 h-4"/>{selectedMember?.full_name?.split(' ')[0]}</>}
-              <ChevronDown className="w-3.5 h-3.5" />
-            </button>
-            {showMemberDrop && (
-              <div className="absolute top-full left-0 mt-2 bg-white rounded-ios-lg shadow-ios-modal border border-ios-separator/30 py-1 z-50 w-52">
-                <button onClick={() => { updateMainFilter('all'); setShowMemberDrop(false); }}
-                  className={`flex items-center gap-2 w-full px-3 py-2.5 text-subhead hover:bg-ios-fill ${mainFilter==='all' ? 'text-ios-blue font-semibold' : 'text-ios-primary'}`}>
-                  <Users className="w-4 h-4"/>All members {mainFilter==='all' && <Check className="w-4 h-4 ml-auto"/>}
-                </button>
-                <div className="border-t border-ios-separator/30 my-1"/>
-                {members.map(m => (
-                  <button key={m.id} onClick={() => { updateMainFilter(m.id); setShowMemberDrop(false); }}
-                    className={`flex items-center gap-2 w-full px-3 py-2.5 text-subhead hover:bg-ios-fill ${mainFilter===m.id ? 'text-ios-blue font-semibold' : 'text-ios-primary'}`}>
-                    <div className="w-6 h-6 bg-ios-blue rounded-full flex items-center justify-center text-white text-caption2 font-bold shrink-0">{(m.full_name||m.email)[0].toUpperCase()}</div>
-                    <span className="truncate">{m.full_name||m.email}</span>
-                    {mainFilter===m.id && <Check className="w-4 h-4 ml-auto shrink-0"/>}
+            <div className="relative" ref={memberRef}>
+              <button onClick={() => setShowMemberDrop(!showMemberDrop)}
+                className={`flex items-center gap-2 px-3 py-2 rounded-ios text-subhead font-semibold border transition-all ${mainFilter==='all' ? 'bg-white border-ios-separator text-ios-primary' : 'bg-ios-blue border-ios-blue text-white'}`}>
+                {mainFilter==='all' ? <><Users className="w-4 h-4"/>All members</> : <><User className="w-4 h-4"/>{selectedMember?.full_name?.split(' ')[0]}</>}
+                <ChevronDown className="w-3.5 h-3.5" />
+              </button>
+              {showMemberDrop && (
+                <div className="absolute top-full left-0 mt-2 bg-white rounded-ios-lg shadow-ios-modal border border-ios-separator/30 py-1 z-50 w-52">
+                  <button onClick={() => { updateMainFilter('all'); setShowMemberDrop(false); }}
+                    className={`flex items-center gap-2 w-full px-3 py-2.5 text-subhead hover:bg-ios-fill ${mainFilter==='all' ? 'text-ios-blue font-semibold' : 'text-ios-primary'}`}>
+                    <Users className="w-4 h-4"/>All members {mainFilter==='all' && <Check className="w-4 h-4 ml-auto"/>}
                   </button>
-                ))}
-              </div>
-            )}
-          </div>
-          <div className="h-6 w-px bg-ios-separator hidden sm:block"/>
+                  <div className="border-t border-ios-separator/30 my-1"/>
+                  {members.map(m => (
+                    <button key={m.id} onClick={() => { updateMainFilter(m.id); setShowMemberDrop(false); }}
+                      className={`flex items-center gap-2 w-full px-3 py-2.5 text-subhead hover:bg-ios-fill ${mainFilter===m.id ? 'text-ios-blue font-semibold' : 'text-ios-primary'}`}>
+                      <div className="w-6 h-6 bg-ios-blue rounded-full flex items-center justify-center text-white text-caption2 font-bold shrink-0">{(m.full_name||m.email)[0].toUpperCase()}</div>
+                      <span className="truncate">{m.full_name||m.email}</span>
+                      {mainFilter===m.id && <Check className="w-4 h-4 ml-auto shrink-0"/>}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-ios-tertiary"/>
             <input className="input pl-9 w-36 py-2 text-footnote" placeholder="Search..." value={search} onChange={e => setSearch(e.target.value)}/>
