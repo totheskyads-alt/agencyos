@@ -46,9 +46,21 @@ export function TimerProvider({ children }) {
 
   async function loadTimer(uid) {
     if (lockRef.current) return;
-    const { data } = await supabase.from('time_entries')
+    // Use limit(1) + order so multiple ghost entries don't break .maybeSingle()
+    const { data: rows } = await supabase.from('time_entries')
       .select('*, projects(name,color), tasks(title)')
-      .eq('user_id', uid || userId).is('end_time', null).maybeSingle();
+      .eq('user_id', uid || userId).is('end_time', null)
+      .order('created_at', { ascending: false }).limit(1);
+    const data = rows?.[0] || null;
+
+    // Clean up ghost entries (older duplicates with no end_time)
+    if (rows && rows.length > 1) {
+      const ghostIds = rows.slice(1).map(r => r.id);
+      const dur = Math.max(1, getElapsed(rows[0].start_time));
+      await Promise.all(ghostIds.map(id =>
+        supabase.from('time_entries').update({ end_time: new Date().toISOString(), duration_seconds: 1 }).eq('id', id)
+      ));
+    }
 
     if (lockRef.current) return; // check again after await
 
