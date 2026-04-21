@@ -7,8 +7,18 @@ const CATEGORIES = ['UI/Design', 'Timer', 'Tasks', 'Billing', 'Reports', 'Projec
 
 export default function BugsPage() {
   const [bugs, setBugs] = useState([]);
-  const [form, setForm] = useState({ title: '', category: 'Other', description: '', steps: '', expected: '', actual: '', priority: 'medium' });
+  const [form, setForm] = useState(() => {
+    try {
+      const saved = localStorage.getItem('sm_bug_draft');
+      return saved ? JSON.parse(saved) : { title: '', category: 'Other', description: '', steps: '', expected: '', actual: '', priority: 'medium' };
+    } catch { return { title: '', category: 'Other', description: '', steps: '', expected: '', actual: '', priority: 'medium' }; }
+  });
   const [submitted, setSubmitted] = useState(false);
+  const [editingBugId, setEditingBugId] = useState(null);
+
+  useEffect(() => {
+    try { localStorage.setItem('sm_bug_draft', JSON.stringify(form)); } catch {}
+  }, [form]);
   const [profile, setProfile] = useState(null);
 
   useEffect(() => {
@@ -26,12 +36,20 @@ export default function BugsPage() {
 
   async function submit() {
     if (!form.title.trim()) return;
-    await supabase.from('bugs').insert({
+    const payload = {
       title: form.title, description: form.description, steps_to_reproduce: form.steps,
       expected_behavior: form.expected, actual_behavior: form.actual,
-      environment: form.category, priority: form.priority, status: 'open',
-    });
-    setForm({ title: '', category: 'Other', description: '', steps: '', expected: '', actual: '', priority: 'medium' });
+      environment: form.category, priority: form.priority,
+    };
+    if (editingBugId) {
+      await supabase.from('bugs').update(payload).eq('id', editingBugId);
+      setEditingBugId(null);
+    } else {
+      await supabase.from('bugs').insert({ ...payload, status: 'open' });
+    }
+    const empty = { title: '', category: 'Other', description: '', steps: '', expected: '', actual: '', priority: 'medium' };
+    setForm(empty);
+    try { localStorage.setItem('sm_bug_draft', JSON.stringify(empty)); } catch {}
     setSubmitted(true);
     setTimeout(() => setSubmitted(false), 3000);
     load();
@@ -160,7 +178,7 @@ Repository structure: agencyos/app/dashboard/ + agencyos/components/ + agencyos/
 
           <button onClick={submit} disabled={!form.title.trim()}
             className="btn-primary w-full flex items-center justify-center gap-2">
-            <Bug className="w-4 h-4" /> Save Bug Report
+            <Bug className="w-4 h-4" /> {editingBugId ? 'Update Bug' : 'Save Bug Report'}
           </button>
         </div>
 
@@ -201,6 +219,9 @@ Repository structure: agencyos/app/dashboard/ + agencyos/components/ + agencyos/
                     <span className={`ml-2 text-caption2 font-semibold uppercase ${priorityColor[b.priority]}`}>{b.priority}</span>
                   </div>
                   <div className="flex gap-1.5 shrink-0">
+                    <button onClick={() => { setForm({ title:b.title, category:b.environment||'Other', description:b.description||'', steps:b.steps_to_reproduce||'', expected:b.expected_behavior||'', actual:b.actual_behavior||'', priority:b.priority||'medium' }); setEditingBugId(b.id); window.scrollTo({top:0,behavior:'smooth'}); }} className="p-1.5 rounded hover:bg-blue-50 text-ios-tertiary hover:text-ios-blue" title="Edit">
+                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+                    </button>
                     <button onClick={() => resolve(b.id)} className="p-1.5 rounded hover:bg-green-50 text-ios-tertiary hover:text-ios-green" title="Mark resolved">
                       <CheckCircle className="w-3.5 h-3.5" />
                     </button>
