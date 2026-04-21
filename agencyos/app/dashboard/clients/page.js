@@ -140,6 +140,16 @@ export default function ClientsPage() {
                       {c.email && <div className="flex items-center gap-1 text-caption1 text-ios-secondary truncate"><Mail className="w-3 h-3 shrink-0" />{c.email}</div>}
                     </div>
                   )}
+                  <div className="mt-3 pt-2 border-t border-ios-separator/30 flex gap-2" onClick={e => e.stopPropagation()}>
+                    <a href={`/dashboard/projects?client=${c.id}`}
+                      className="flex-1 text-center py-1.5 rounded-ios bg-ios-fill text-caption1 font-semibold text-ios-secondary hover:bg-ios-fill2 transition-colors">
+                      Projects →
+                    </a>
+                    <a href={`/dashboard/tasks?client=${c.id}`}
+                      className="flex-1 text-center py-1.5 rounded-ios bg-blue-50 text-caption1 font-semibold text-ios-blue hover:bg-blue-100 transition-colors">
+                      Tasks →
+                    </a>
+                  </div>
                 </div>
               ))}
             </div>
