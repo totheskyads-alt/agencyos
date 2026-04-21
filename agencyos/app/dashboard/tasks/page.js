@@ -415,7 +415,7 @@ function TaskDetail({ task, members, boardColumns, projects, labels: allLabels, 
                   ))}
                   <div className="border-t border-ios-separator/30 p-2">
                     {showNewLabel ? (
-                      <div className="space-y-2 overflow-y-auto" style={{maxHeight:'calc(100vh - 280px)'}}>
+                      <div className="space-y-2 overflow-y-auto flex-1" style={{maxHeight:'calc(100vh - 260px)'}}>
                         <input className="input py-1.5 text-footnote" placeholder="Label name" value={newLabelName} onChange={e => setNewLabelName(e.target.value)} autoFocus />
                         <div className="flex gap-1.5 flex-wrap">{COL_COLORS.map(c => <button key={c} onClick={() => setNewLabelColor(c)} style={{ background: c }} className={`w-5 h-5 rounded-full ${newLabelColor===c ? 'ring-2 ring-offset-1 ring-gray-400' : ''}`} />)}</div>
                         <div className="flex gap-2">
@@ -530,7 +530,7 @@ function TaskDetail({ task, members, boardColumns, projects, labels: allLabels, 
               <button onClick={() => fileRef.current?.click()} className="p-2 rounded-ios hover:bg-ios-fill text-ios-tertiary hover:text-ios-blue" title="Attach file">
                 <Paperclip className="w-4 h-4" />
               </button>
-              <input className="input flex-1" placeholder="Add comment... (Enter to send)"
+              <input className="input flex-1 resize-none" style={{whiteSpace:"pre-wrap",wordBreak:"break-word"}} placeholder="Add comment... (Enter to send)"
                 value={newComment} onChange={e => setNewComment(e.target.value)}
                 onKeyDown={e => { if (e.key==='Enter' && !e.shiftKey) { e.preventDefault(); addComment(); }}} />
               <button onClick={addComment} disabled={(!newComment.trim() && !commentFile) || sending} className="btn-primary px-3">
@@ -1033,7 +1033,7 @@ export default function TasksPage() {
             const isDragTarget = dragOver===col.id;
             return (
               <div key={col.id}
-                className={`shrink-0 w-64 rounded-ios-lg p-3 transition-all flex flex-col ${isDragTarget ? 'bg-blue-50 ring-2 ring-ios-blue' : dragOverCol === col.id && dragCol !== col.id ? 'ring-2 ring-ios-orange ring-dashed' : 'bg-ios-bg'}`}
+                className={`shrink-0 w-72 rounded-ios-lg p-3 transition-all flex flex-col ${isDragTarget ? 'bg-blue-50 ring-2 ring-ios-blue' : dragOverCol === col.id && dragCol !== col.id ? 'ring-2 ring-ios-orange ring-dashed' : 'bg-ios-bg'}`}
                 onDragOver={e => { e.preventDefault(); if (dragCol) setDragOverCol(col.id); else setDragOver(col.id); }}
                 onDragLeave={() => { setDragOver(null); setDragOverCol(null); }}
                 onDrop={e => { if (dragCol) { reorderColumns(dragCol, col.id); setDragCol(null); setDragOverCol(null); } else { handleDrop(e, col.id); } }}>
@@ -1056,9 +1056,13 @@ export default function TasksPage() {
                         onDragEnd={() => { setDragOver(null); setDragTaskId(null); setDragOverTaskId(null); }}
                         onDragOver={e => { e.preventDefault(); e.stopPropagation(); setDragOverTaskId(task.id); }}
                         onDrop={async e => {
-                          e.preventDefault(); e.stopPropagation();
+                          e.preventDefault();
                           const srcId = e.dataTransfer.getData('taskId');
-                          if (srcId && srcId !== task.id) {
+                          if (!srcId || srcId === task.id) { setDragOverTaskId(null); return; }
+                          const srcTask = boardTasks.find(t => t.id === srcId);
+                          if (srcTask?.column_id === col.id) {
+                            // Same column — reorder
+                            e.stopPropagation();
                             const colItems = boardTasks.filter(t => t.column_id === col.id);
                             const srcIdx = colItems.findIndex(t => t.id === srcId);
                             const dstIdx = colItems.findIndex(t => t.id === task.id);
@@ -1070,6 +1074,7 @@ export default function TasksPage() {
                               await Promise.all(reordered.map((t, i) => supabase.from('tasks').update({ position: i, column_id: col.id }).eq('id', t.id)));
                             }
                           }
+                          // Cross-column: let bubble to column handler
                           setDragOverTaskId(null);
                         }}
                         onClick={() => setTaskModal(task)}
