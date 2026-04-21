@@ -1219,7 +1219,7 @@ export default function TasksPage() {
         <TaskDetail task={taskModal} members={members} boardColumns={boardColumns} projects={projects} labels={labels}
           activeTimer={activeTimer} elapsed={elapsed} currentUser={currentUser}
           onClose={() => setTaskModal(null)}
-          onSave={() => { setTaskModal(null); loadAll(); }}
+          onSave={() => { setTaskModal(null); loadTasks(); try { localStorage.setItem('sm_tasks_updated', Date.now().toString()); } catch {} }}
           onDelete={() => deleteTask(taskModal.id)}
           onStartTimer={handleStartTimer} onStopTimer={stopTimer} onPauseTimer={pauseTimer} isPaused={isPaused} />
       )}
