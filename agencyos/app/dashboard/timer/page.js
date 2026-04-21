@@ -22,9 +22,6 @@ export default function TimerPage() {
   const [projects, setProjects] = useState([]);
   const [entries, setEntries] = useState([]);
   const [user, setUser] = useState(null);
-  const [isPaused, setIsPaused] = useState(false);
-  const [pausedAt, setPausedAt] = useState(null);
-  const [pauseSeconds, setPauseSeconds] = useState(0);
   const [editingEntry, setEditingEntry] = useState(null);
   const [editForm, setEditForm] = useState({ duration_minutes:'', description:'', project_id:'' });
   const [showPast, setShowPast] = useState(false);
@@ -158,7 +155,7 @@ export default function TimerPage() {
             {!isPaused && <p className="text-caption1 opacity-60 mt-2">Started {fmtTime(activeTimer.start_time)}</p>}
           </div>
           <div className="p-4 grid grid-cols-2 gap-3">
-            <button onClick={handlePause}
+            <button onClick={pauseTimer}
               className={`py-3 rounded-ios-lg font-semibold text-subhead flex items-center justify-center gap-2 transition-colors ${isPaused ? 'bg-blue-50 border border-blue-100 text-ios-blue' : 'bg-orange-50 border border-orange-100 text-ios-orange'}`}>
               {isPaused ? <><Play className="w-4 h-4" fill="currentColor" />Resume</> : <><Pause className="w-4 h-4" fill="currentColor" />Pause</>}
             </button>
