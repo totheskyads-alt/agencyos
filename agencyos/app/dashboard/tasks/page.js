@@ -179,8 +179,19 @@ function TaskDetail({ task, members, boardColumns, projects, labels: allLabels, 
     if (!form.title.trim() || !form.project_id) return;
     setLoading(true);
     const payload = { ...form, assigned_to: form.assigned_to || null, due_date: form.due_date || null, column_id: form.column_id || boardColumns[0]?.id || null };
-    if (task?.id) await supabase.from('tasks').update(payload).eq('id', task.id);
-    else await supabase.from('tasks').insert({ ...payload, status: 'todo' });
+    if (task?.id) {
+      await supabase.from('tasks').update(payload).eq('id', task.id);
+    } else {
+      const { data: saved } = await supabase.from('tasks')
+        .insert({ ...payload, status: 'todo', position: 9999 })
+        .select().single();
+      // Apply pending labels
+      if (saved && pendingLabels.length > 0) {
+        await Promise.all(pendingLabels.map(l =>
+          supabase.from('task_labels').insert({ task_id: saved.id, label_id: l.id })
+        ));
+      }
+    }
     setLoading(false); onSave();
   }
 
@@ -191,9 +202,10 @@ function TaskDetail({ task, members, boardColumns, projects, labels: allLabels, 
     if (newProjClientId) payload.client_id = newProjClientId;
     const { data } = await supabase.from('projects').insert(payload).select('*, clients(name)').single();
     if (data) {
+      // Reload full projects list from DB
+      const { data: freshProjects } = await supabase.from('projects').select('*, clients(id,name)').eq('status','active').order('name');
+      if (freshProjects) setProjects(freshProjects);
       setForm(p => ({ ...p, project_id: data.id }));
-      // Add to local projects list without closing modal
-      setProjects(prev => [...prev, data].sort((a,b) => a.name.localeCompare(b.name)));
     }
     setShowNewProj(false); setNewProjName(''); setNewProjClientId('');
   }
@@ -904,9 +916,12 @@ export default function TasksPage() {
       </div>
 
       {/* Board mode: person switcher — admin only */}
-      {mode === 'board' && role === 'admin' && allMembers.length > 1 && (
+      {mode === 'board' && (role === 'admin' || role === 'manager') && allMembers.length > 1 && (
         <div className="flex items-center gap-2 overflow-x-auto pb-1 -mt-1">
-          {[{ id: currentUser?.id, label: 'My Board' }, ...allMembers.filter(m => m.id !== currentUser?.id).map(m => ({ id: m.id, label: m.full_name?.split(' ')[0] || m.email }))].map(item => {
+          {[{ id: currentUser?.id, label: 'My Board' }, ...allMembers
+            .filter(m => m.id !== currentUser?.id && (role === 'admin' || m.role !== 'admin'))
+            .map(m => ({ id: m.id, label: m.full_name?.split(' ')[0] || m.email }))
+          ].map(item => {
             const effectiveViewing = viewingUserId || currentUser?.id;
             const active = effectiveViewing === item.id;
             return (
@@ -926,7 +941,7 @@ export default function TasksPage() {
       {/* Filters */}
       {mode !== 'archive' && (
         <div className="flex items-center gap-2 flex-wrap">
-          {mode === 'list' && (
+          {mode === 'list' && role !== 'operator' && (
             <div className="relative" ref={memberRef}>
               <button onClick={() => setShowMemberDrop(!showMemberDrop)}
                 className={`flex items-center gap-2 px-3 py-2 rounded-ios text-subhead font-semibold border transition-all ${mainFilter==='all' ? 'bg-white border-ios-separator text-ios-primary' : 'bg-ios-blue border-ios-blue text-white'}`}>
@@ -1135,7 +1150,9 @@ export default function TasksPage() {
                                 <MessageSquare className="w-3 h-3"/><span className="text-[10px]">{task.comment_count}</span>
                               </div>
                             )}
-                            {pri && <div className="w-1.5 h-1.5 rounded-full shrink-0" style={{background:pri.color}} title={pri.label}/>}
+                            {pri && pri.label !== 'Medium' && (
+              <span className="text-[9px] font-bold px-1 py-0.5 rounded" style={{background:pri.color+'20', color:pri.color}}>{pri.label}</span>
+            )}
                           </div>
                           <div className="flex items-center gap-1 shrink-0">
                             {task.due_date && <span className="text-[10px] text-ios-tertiary">{new Date(task.due_date).toLocaleDateString('en-US',{day:'numeric',month:'short'})}</span>}
