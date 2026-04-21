@@ -643,7 +643,9 @@ export default function TasksPage() {
   });
   const updateMainFilter = (v) => { setMainFilter(v); try { localStorage.setItem('sm_member_filter', v); } catch {} };
   const [filterProject, setFilterProject] = useState('');
-  const [viewingUserId, setViewingUserId] = useState(null); // null = own board
+  const [viewingUserId, setViewingUserId] = useState(null);
+  const viewingUserIdRef = useRef(null);
+  const currentUserRef2 = useRef(null); // null = own board
   const [allMembers, setAllMembers] = useState([]);
   const [filterLabel, setFilterLabel] = useState('');
   const [filterPriority, setFilterPriority] = useState('');
@@ -667,10 +669,19 @@ export default function TasksPage() {
   const { isManager, role, profile: userProfile } = useRole();
 
   useEffect(() => {
-    supabase.auth.getUser().then(({ data: { user } }) => { setCurrentUser(user); loadTimer(); });
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      setCurrentUser(user);
+      currentUserRef2.current = user;
+      loadTimer();
+    });
     loadAll();
-    // Poll every 15s + listen for cross-tab updates
-    const interval = setInterval(() => loadTasks(), 15000);
+    // Poll every 15s — reload tasks AND restore columns for current viewing user
+    const interval = setInterval(async () => {
+      await loadTasks();
+      const uid = viewingUserIdRef.current || currentUserRef2.current?.id;
+      const myUid = currentUserRef2.current?.id;
+      if (uid && myUid) loadColumnsForUser(uid, myUid);
+    }, 15000);
     const onStorage = (e) => { if (e.key === 'sm_tasks_updated') loadTasks(); };
     window.addEventListener('storage', onStorage);
     return () => { clearInterval(interval); window.removeEventListener('storage', onStorage); };
@@ -826,7 +837,13 @@ export default function TasksPage() {
   async function deleteTask(taskId) {
     if (!confirm('Delete task permanently?')) return;
     await supabase.from('tasks').delete().eq('id', taskId);
-    setTaskModal(null); loadTasks(); try { localStorage.setItem('sm_tasks_updated', Date.now().toString()); } catch {}
+    setTaskModal(null);
+    await loadTasks();
+    // Restore columns for currently viewed board (in case they reset)
+    const uid = viewingUserIdRef.current || currentUserRef2.current?.id;
+    const myUid = currentUserRef2.current?.id;
+    if (uid && myUid) await loadColumnsForUser(uid, myUid);
+    try { localStorage.setItem('sm_tasks_updated', Date.now().toString()); } catch {}
   }
 
   async function handleStartTimer(task) { await startTimer({ projectId: task.project_id, taskId: task.id, description: task.title }); }
@@ -903,7 +920,7 @@ export default function TasksPage() {
             const active = effectiveViewing === item.id;
             return (
               <button key={item.id} onClick={async () => {
-                  setViewingUserId(item.id === currentUser?.id ? null : item.id);
+                  const newVid = item.id === currentUser?.id ? null : item.id; setViewingUserId(newVid); viewingUserIdRef.current = newVid;
                   await loadColumnsForUser(item.id, currentUser?.id);
                   await loadTasks();
                 }}
