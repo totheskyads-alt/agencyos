@@ -38,8 +38,8 @@ export default function BugsPage() {
 
   async function load() {
     const [{ data: b }, { data: i }] = await Promise.all([
-      supabase.from('bugs').select('*').order('created_at', { ascending: false }),
-      supabase.from('ideas').select('*').order('created_at', { ascending: false }),
+      supabase.from('bugs').select('*, reporter:reported_by(full_name,nickname,email)').order('created_at', { ascending: false }),
+      supabase.from('ideas').select('*, reporter:reported_by(full_name,nickname,email)').order('created_at', { ascending: false }),
     ]);
     setBugs(b || []);
     setIdeas(i || []);
@@ -158,7 +158,7 @@ export default function BugsPage() {
                       <span className="text-caption2 text-ios-blue font-semibold">{b.environment}</span>
                     </div>
                     <p className="text-subhead font-semibold">{b.title}</p>
-                    {b.reporter_name && <p className="text-caption1 text-ios-tertiary">by {b.reporter_name}</p>}
+                    {b.reporter && <p className="text-caption1 text-ios-tertiary">by {b.reporter.nickname || b.reporter.full_name || b.reporter.email}</p>}
                     {b.description && <p className="text-footnote text-ios-secondary mt-0.5 line-clamp-2">{b.description}</p>}
                   </div>
                   <div className="flex gap-1.5 shrink-0">
