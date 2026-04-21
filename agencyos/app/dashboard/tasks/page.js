@@ -203,12 +203,15 @@ function TaskDetail({ task, members, boardColumns, projects, labels: allLabels, 
     const { data } = await supabase.from('projects').insert(payload).select('*, clients(name)').single();
     if (data) {
       const { data: freshProjects } = await supabase.from('projects').select('*, clients(id,name)').eq('status','active').order('name');
-      if (freshProjects) setProjects(freshProjects);
-      // Auto-select the new project in the form
+      if (freshProjects) {
+        setProjects(freshProjects);
+      }
       setForm(p => ({ ...p, project_id: data.id }));
-      setShowProjDrop(false);
     }
-    setShowNewProj(false); setNewProjName(''); setNewProjClientId('');
+    setShowNewProj(false);
+    setShowProjDrop(false);
+    setNewProjName('');
+    setNewProjClientId('');
   }
 
   async function addComment() {
@@ -514,7 +517,15 @@ function TaskDetail({ task, members, boardColumns, projects, labels: allLabels, 
                           </div>
                         ) : (
                           <>
-                            {c.content && <p className="text-subhead whitespace-pre-wrap">{c.content}</p>}
+                            {c.content && (
+                        <p className="text-subhead whitespace-pre-wrap break-words">
+                          {c.content.split(' ').map((word, i) =>
+                            word.startsWith('http://') || word.startsWith('https://')
+                              ? <><a key={i} href={word} target="_blank" rel="noopener noreferrer" onClick={e=>e.stopPropagation()} className="text-ios-blue underline">{word}</a>{' '}</>
+                              : word + ' '
+                          )}
+                        </p>
+                      )}
                             {c.file_url && (
                               <button onClick={e => { e.stopPropagation(); downloadFile(c.file_url, c.file_name); }}
                                 className="flex items-center gap-1.5 mt-1.5 text-footnote text-ios-blue hover:underline">
@@ -1151,8 +1162,8 @@ export default function TasksPage() {
                                 <MessageSquare className="w-3 h-3"/><span className="text-[10px]">{task.comment_count}</span>
                               </div>
                             )}
-                            {pri && pri.label !== 'medium' && pri.label !== 'Medium' && (
-                              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full" style={{background:pri.color, color:'white'}}>{pri.label}</span>
+                            {pri && task.priority !== 'medium' && (
+                              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full text-white" style={{background:pri.dot}}>{pri.label}</span>
                             )}
                           </div>
                           <div className="flex items-center gap-1 shrink-0">
