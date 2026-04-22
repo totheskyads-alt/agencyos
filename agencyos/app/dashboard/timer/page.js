@@ -2,7 +2,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useTimer } from '@/lib/timerContext';
-import { fmtClock, fmtDuration, fmtTime, getElapsed, parseUTC } from '@/lib/utils';
+import { fmtClock, fmtDuration, fmtTime, parseUTC } from '@/lib/utils';
 import { Square, Pause, Play, Edit2, Trash2, Plus, X, RotateCcw } from 'lucide-react';
 import Modal from '@/components/Modal';
 
@@ -44,7 +44,7 @@ export default function TimerPage() {
     const [{ data: proj }, { data: ent }] = await Promise.all([
       supabase.from('projects').select('id,name,color,clients(name)').eq('status','active').order('name'),
       supabase.from('time_entries').select('*, projects(name,color,clients(name)), tasks(title)')
-        .eq('user_id', u.id).not('end_time','is',null).order('created_at',{ascending:false}).limit(60),
+        .eq('user_id', u.id).not('end_time','is',null).order('start_time',{ascending:false}).limit(60),
     ]);
     setProjects(proj||[]);
     setEntries(ent||[]);
@@ -112,11 +112,7 @@ export default function TimerPage() {
     if (!pastForm.project_id || !pastForm.duration_minutes || !user) return;
     setSavingPast(true);
     const secs = Math.round(parseFloat(pastForm.duration_minutes) * 60);
-    // Use local time to avoid timezone shifting the date
     const timeStr = pastForm.start_time || '09:00';
-    const localStr = `${pastForm.date}T${timeStr}:00`;
-    const startTime = new Date(localStr + (localStr.includes('Z') ? '' : '')).toISOString();
-    // Force the date to stay correct: create in local time
     const d = new Date(pastForm.date + 'T' + timeStr + ':00');
     const startTime2 = new Date(d.getTime()).toISOString();
     const endTime = new Date(d.getTime() + secs * 1000).toISOString();
@@ -131,7 +127,7 @@ export default function TimerPage() {
   }
 
   const grouped = entries.reduce((acc, e) => {
-    const key = fmtDateGroup(e.created_at);
+    const key = fmtDateGroup(e.start_time || e.created_at);
     if (!acc[key]) acc[key] = [];
     acc[key].push(e);
     return acc;
@@ -212,6 +208,9 @@ export default function TimerPage() {
             </div>
             {dayEntries.map(e => {
               const isEditing = editingEntry === e.id;
+              const displayEndTime = e.start_time && e.duration_seconds
+                ? new Date(parseUTC(e.start_time).getTime() + (e.duration_seconds || 0) * 1000).toISOString()
+                : e.end_time;
               return (
                 <div key={e.id} className="border-b border-ios-separator/20 last:border-0">
                   {isEditing ? (
@@ -247,7 +246,7 @@ export default function TimerPage() {
                       <div className="flex-1 min-w-0">
                         <p className="text-subhead font-medium text-ios-primary truncate">{e.projects?.name||'No project'}</p>
                         <p className="text-caption1 text-ios-secondary">
-                          {e.tasks?.title||e.description||'—'} · {fmtTime(e.start_time)}–{fmtTime(e.end_time)}
+                          {e.tasks?.title||e.description||'—'} · {fmtTime(e.start_time)}–{fmtTime(displayEndTime)}
                         </p>
                       </div>
                       <div className="flex items-center gap-1.5 shrink-0">

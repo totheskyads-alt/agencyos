@@ -4,7 +4,7 @@
 export function parseUTC(dateStr) {
   if (!dateStr) return null;
   const s = typeof dateStr === 'string' ? dateStr : dateStr.toString();
-  return new Date(s.endsWith('Z') ? s : s + 'Z');
+  return new Date(/([zZ]|[+-]\d{2}:?\d{2})$/.test(s) ? s : s + 'Z');
 }
 
 export function getElapsed(startTime) {

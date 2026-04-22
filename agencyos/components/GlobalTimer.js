@@ -2,7 +2,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { useTimer } from '@/lib/timerContext';
 import { supabase } from '@/lib/supabase';
-import { fmtClock, fmtDuration, getElapsed } from '@/lib/utils';
+import { fmtClock, fmtDuration, parseUTC } from '@/lib/utils';
 import { Play, Square, Pause, X, Check, ChevronUp, ChevronDown } from 'lucide-react';
 
 export default function GlobalTimer() {
@@ -50,11 +50,18 @@ export default function GlobalTimer() {
     if (!stoppedEntry) return;
     const mins = parseFloat(editDuration) || 0;
     const secs = Math.round(mins * 60);
-    const start = new Date(stoppedEntry.start_time);
+    const start = parseUTC(stoppedEntry.start_time);
     const newEnd = new Date(start.getTime() + secs * 1000).toISOString();
     await supabase.from('time_entries').update({
       duration_seconds: secs, end_time: newEnd, description: editDesc || null,
     }).eq('id', stoppedEntry.id);
+    dismissOverview();
+  }
+
+  async function discardStoppedEntry() {
+    if (stoppedEntry?.id) {
+      await supabase.from('time_entries').delete().eq('id', stoppedEntry.id);
+    }
     dismissOverview();
   }
 
@@ -68,7 +75,7 @@ export default function GlobalTimer() {
               <div className="w-2 h-2 bg-ios-green rounded-full" />
               <p className="text-subhead font-semibold text-ios-green">Timer stopped — review entry</p>
             </div>
-            <button onClick={dismissOverview} className="text-ios-tertiary hover:text-ios-primary p-1">
+            <button onClick={discardStoppedEntry} className="text-ios-tertiary hover:text-ios-primary p-1" title="Discard entry">
               <X className="w-4 h-4" />
             </button>
           </div>
@@ -99,10 +106,7 @@ export default function GlobalTimer() {
               <input className="input" value={editDesc} onChange={e => setEditDesc(e.target.value)} placeholder="What did you work on?" />
             </div>
             <div className="flex gap-3">
-              <button onClick={async () => {
-                  await supabase.from('time_entries').delete().eq('id', stoppedEntry.id);
-                  dismissOverview();
-                }}
+              <button onClick={discardStoppedEntry}
                 className="flex-1 py-2 rounded-ios text-footnote font-semibold text-white bg-ios-red hover:bg-red-600 transition-colors">
                 Discard
               </button>

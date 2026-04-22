@@ -9,8 +9,8 @@ import { useState } from 'react';
 const ALL_NAV = [
   { href: '/dashboard',          icon: LayoutDashboard, label: 'Dashboard',    permission: null },
   { href: '/dashboard/timer',    icon: Timer,           label: 'Timer',        permission: null },
-  { href: '/dashboard/clients',  icon: Users,           label: 'Clients',      permission: 'canManageClients' },
-  { href: '/dashboard/projects', icon: FolderOpen,      label: 'Projects',     permission: 'canManageProjects' },
+  { href: '/dashboard/clients',  icon: Users,           label: 'Clients',      permission: 'canViewClients' },
+  { href: '/dashboard/projects', icon: FolderOpen,      label: 'Projects',     permission: 'canViewProjects' },
   { href: '/dashboard/tasks',    icon: CheckSquare,     label: 'Tasks',        permission: null },
   { href: '/dashboard/billing',  icon: Receipt,         label: 'Billing',      permission: 'canViewBilling' },
   { href: '/dashboard/reports',  icon: BarChart3,       label: 'Reports',      permission: 'canViewReports' },
@@ -32,14 +32,14 @@ export default function Sidebar({ user, profile }) {
 
   return (
     <>
-      <div className="lg:hidden fixed top-0 left-0 right-0 z-40 bg-white/90 backdrop-blur-ios border-b border-ios-separator/50 px-4 py-3 flex items-center justify-between">
+      <div className="lg:hidden fixed top-0 left-0 right-0 z-40 bg-white/90 backdrop-blur-ios border-b border-ios-separator/50 px-4 py-3 flex items-center gap-3">
+        <button onClick={() => setOpen(!open)} className="p-2 -ml-2 rounded-ios hover:bg-ios-fill">
+          {open ? <X className="w-5 h-5 text-ios-secondary" /> : <Menu className="w-5 h-5 text-ios-secondary" />}
+        </button>
         <div className="flex items-center gap-2">
           <img src="/logo.jpg" alt="Sky Metrics" className="w-8 h-8 rounded-full object-cover" />
           <span className="text-headline font-bold text-ios-primary">Sky Metrics</span>
         </div>
-        <button onClick={() => setOpen(!open)} className="p-2 rounded-ios hover:bg-ios-fill">
-          {open ? <X className="w-5 h-5 text-ios-secondary" /> : <Menu className="w-5 h-5 text-ios-secondary" />}
-        </button>
       </div>
 
       {open && <div className="lg:hidden fixed inset-0 bg-black/30 z-30 backdrop-blur-sm" onClick={() => setOpen(false)} />}

@@ -5,6 +5,7 @@ import Modal from '@/components/Modal';
 import { useRole } from '@/lib/useRole';
 import { fmtDuration, fmtCurrency } from '@/lib/utils';
 import { Plus, Search, Euro, Trash2, ChevronDown, FolderOpen, Archive } from 'lucide-react';
+import { useSearchParams } from 'next/navigation';
 
 const COLORS = ['#007AFF','#34C759','#FF9500','#FF3B30','#AF52DE','#32ADE6','#5856D6','#FF2D55','#00C7BE'];
 const MONTHS_FULL = ['January','February','March','April','May','June','July','August','September','October','November','December'];
@@ -30,10 +31,18 @@ export default function ProjectsPage() {
   const [showNewClient, setShowNewClient] = useState(false);
   const [clientSearch, setClientSearch] = useState('');
   const [clientForm, setClientForm] = useState(emptyClient);
-  const { isAdmin } = useRole();
   const [savingClient, setSavingClient] = useState(false);
+  const searchParams = useSearchParams();
+  const clientFilter = searchParams.get('client') || '';
+  const { isAdmin, can } = useRole();
+  const canManageProjects = can('canManageProjects');
 
   useEffect(() => { load(); }, []);
+  useEffect(() => {
+    if (!clientFilter || clients.length === 0) return;
+    const client = clients.find(c => c.id === clientFilter);
+    if (client) setSearch(client.name);
+  }, [clientFilter, clients]);
 
   async function load() {
     const [{ data: proj }, { data: cli }] = await Promise.all([
@@ -53,8 +62,9 @@ export default function ProjectsPage() {
     setInvoices(data||[]);
   }
 
-  function openAdd() { setForm(emptyProj); setSelected(null); setShowNewClient(false); setClientForm(emptyClient); setModal(true); }
+  function openAdd() { if (!canManageProjects) return; setForm(emptyProj); setSelected(null); setShowNewClient(false); setClientForm(emptyClient); setModal(true); }
   function openEdit(p) {
+    if (!canManageProjects) return;
     setForm({ name:p.name, description:p.description||'', client_id:p.client_id||'', status:p.status, color:p.color, billing_day:p.billing_day||'', monthly_amount:p.monthly_amount||'' });
     setSelected(p); setShowNewClient(false); setModal(true);
   }
@@ -122,6 +132,7 @@ export default function ProjectsPage() {
   const filtered = projects.filter(p => {
     if (activeTab === 'active' && p.status !== 'active') return false;
     if (activeTab === 'archived' && p.status !== 'archived') return false;
+    if (clientFilter && p.client_id !== clientFilter) return false;
     return p.name?.toLowerCase().includes(search.toLowerCase()) || p.clients?.name?.toLowerCase().includes(search.toLowerCase());
   });
 
@@ -136,9 +147,11 @@ export default function ProjectsPage() {
           <h1 className="text-title2 font-bold text-ios-primary">Projects</h1>
           <p className="text-subhead text-ios-secondary">{activeCount} active{archivedCount > 0 ? ` · ${archivedCount} archived` : ''}</p>
         </div>
-        <button onClick={openAdd} className="btn-primary flex items-center gap-2">
-          <Plus className="w-4 h-4" strokeWidth={2.5} /> New Project
-        </button>
+        {canManageProjects && (
+          <button onClick={openAdd} className="btn-primary flex items-center gap-2">
+            <Plus className="w-4 h-4" strokeWidth={2.5} /> New Project
+          </button>
+        )}
       </div>
 
       {/* Tabs + search */}
@@ -164,7 +177,7 @@ export default function ProjectsPage() {
         <div className="card p-12 text-center">
           <FolderOpen className="w-8 h-8 text-ios-label4 mx-auto mb-3" />
           <p className="text-headline font-semibold text-ios-secondary mb-4">{activeTab === 'active' ? 'No active projects' : 'No archived projects'}</p>
-          {activeTab === 'active' && <button onClick={openAdd} className="btn-primary">New Project</button>}
+          {activeTab === 'active' && canManageProjects && <button onClick={openAdd} className="btn-primary">New Project</button>}
         </div>
       ) : (() => {
         // Group by client
@@ -182,17 +195,19 @@ export default function ProjectsPage() {
                 <div className="px-4 py-2.5 bg-ios-bg border-b border-ios-separator/30 flex items-center gap-2">
                   <span className="text-footnote font-bold text-ios-secondary uppercase tracking-wide">{group.label}</span>
                   <span className="text-caption2 text-ios-tertiary">({group.projects.length})</span>
-                  {/* Bug #31: link to tasks filtered by client */}
-                  <a href={`/dashboard/tasks?client=${clientId}`}
-                    className="ml-auto text-caption1 text-ios-blue font-semibold hover:underline">
-                    View tasks →
-                  </a>
+                  {clientId !== '__none__' && (
+                    <a href={`/dashboard/tasks?client=${clientId}&mode=list`}
+                      className="ml-auto text-caption1 text-ios-blue font-semibold hover:underline">
+                      View tasks →
+                    </a>
+                  )}
                 </div>
                 {group.projects.map(p => (
-                  <div key={p.id} className="list-row hover:bg-ios-bg transition-colors cursor-pointer" onClick={() => openEdit(p)}>
+                  <div key={p.id} className={`list-row transition-colors ${canManageProjects ? 'hover:bg-ios-bg cursor-pointer' : ''}`} onClick={() => openEdit(p)}>
                     <div className="w-3 h-3 rounded-full shrink-0 mr-3" style={{background:p.color}}/>
                     <div className="flex-1 min-w-0">
                       <p className="text-subhead font-semibold text-ios-primary">{p.name}</p>
+                      {p.clients?.name && <p className="text-caption1 text-ios-secondary">{p.clients.name}</p>}
                       <div className="flex gap-3 flex-wrap">
                         {p.billing_day && <p className="text-footnote text-ios-tertiary">Day {p.billing_day}</p>}
                         {p.monthly_amount && isAdmin && <p className="text-footnote text-ios-green font-semibold">{fmtCurrency(p.monthly_amount)}/mo</p>}
@@ -200,10 +215,9 @@ export default function ProjectsPage() {
                       </div>
                     </div>
                     <div className="flex items-center gap-2 shrink-0" onClick={e => e.stopPropagation()}>
-                      {/* Bug #31: link to tasks for this project */}
-                      <a href={`/dashboard/tasks?project=${p.id}`} onClick={e => e.stopPropagation()}
+                      <a href={`/dashboard/tasks?project=${p.id}&mode=list`} onClick={e => e.stopPropagation()}
                         className="flex items-center gap-1 px-2.5 py-1.5 rounded-ios bg-ios-fill text-ios-secondary text-caption1 font-semibold hover:bg-ios-fill2">
-                        Tasks →
+                        View tasks →
                       </a>
                       {isAdmin && (
                         <button onClick={e => openInvoices(p, e)}
@@ -211,11 +225,13 @@ export default function ProjectsPage() {
                           <Euro className="w-3 h-3"/>Invoice
                         </button>
                       )}
-                      <button onClick={e => toggleArchive(p, e)}
-                        className={`flex items-center gap-1 px-2.5 py-1.5 rounded-ios text-caption1 font-semibold ${p.status==='active' ? 'bg-ios-fill text-ios-secondary hover:bg-ios-fill2' : 'bg-blue-50 text-ios-blue hover:bg-blue-100'}`}>
-                        <Archive className="w-3 h-3"/>
-                        {p.status==='active' ? 'Archive' : 'Restore'}
-                      </button>
+                      {canManageProjects && (
+                        <button onClick={e => toggleArchive(p, e)}
+                          className={`flex items-center gap-1 px-2.5 py-1.5 rounded-ios text-caption1 font-semibold ${p.status==='active' ? 'bg-ios-fill text-ios-secondary hover:bg-ios-fill2' : 'bg-blue-50 text-ios-blue hover:bg-blue-100'}`}>
+                          <Archive className="w-3 h-3"/>
+                          {p.status==='active' ? 'Archive' : 'Restore'}
+                        </button>
+                      )}
                     </div>
                   </div>
                 ))}

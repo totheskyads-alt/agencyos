@@ -21,8 +21,8 @@ const ROLES = {
   operator: {
     label: 'Operator', icon: User,
     color: 'bg-ios-fill text-ios-secondary', badge: 'bg-ios-fill2 text-ios-secondary',
-    permissions: ['View own assigned tasks only','Use timer on own tasks','Add comments & files'],
-    denied: ['No billing or reports access','Cannot manage projects or clients','Cannot manage columns'],
+    permissions: ['View own assigned tasks only','View clients and projects','Use timer on own tasks','Add comments & files'],
+    denied: ['No billing or reports access','Cannot edit projects or clients','Cannot manage columns'],
   },
 };
 
@@ -151,9 +151,13 @@ export default function TeamPage() {
           return (
             <div key={m.id} className={`card p-4 ${isMe ? 'ring-2 ring-ios-blue' : ''}`}>
               <div className="flex items-center gap-4">
-                <div className="w-12 h-12 bg-ios-blue rounded-full flex items-center justify-center text-white text-headline font-bold shrink-0">
-                  {initials}
-                </div>
+                {m.avatar_url ? (
+                  <img src={m.avatar_url} alt="avatar" className="w-12 h-12 rounded-full object-cover shrink-0 ring-2 ring-ios-separator/60" />
+                ) : (
+                  <div className="w-12 h-12 bg-ios-blue rounded-full flex items-center justify-center text-white text-headline font-bold shrink-0">
+                    {initials}
+                  </div>
+                )}
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 flex-wrap mb-0.5">
                     <p className="text-subhead font-semibold">{m.full_name || 'No name'}</p>

@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import Modal from '@/components/Modal';
+import { useRole } from '@/lib/useRole';
 import { fmtDuration, fmtCurrency } from '@/lib/utils';
 import { Plus, Search, ChevronRight, Mail, Phone } from 'lucide-react';
 
@@ -23,6 +24,8 @@ export default function ClientsPage() {
   const [selected, setSelected] = useState(null);
   const [form, setForm] = useState(empty);
   const [loading, setLoading] = useState(false);
+  const { can } = useRole();
+  const canManageClients = can('canManageClients');
 
   useEffect(() => { load(); }, []);
 
@@ -52,8 +55,9 @@ export default function ClientsPage() {
     setClientRevenue(rev);
   }
 
-  function openAdd() { setForm(empty); setSelected(null); setModal(true); }
+  function openAdd() { if (!canManageClients) return; setForm(empty); setSelected(null); setModal(true); }
   function openEdit(c) {
+    if (!canManageClients) return;
     setForm({ name: c.name, company: c.company||'', email: c.email||'', phone: c.phone||'', notes: c.notes||'', client_type: c.client_type||'direct' });
     setSelected(c); setModal(true);
   }
@@ -87,9 +91,11 @@ export default function ClientsPage() {
           <h1 className="text-title2 font-bold text-ios-primary">Clients</h1>
           <p className="text-subhead text-ios-secondary">{clients.length} clients</p>
         </div>
-        <button onClick={openAdd} className="btn-primary flex items-center gap-2">
-          <Plus className="w-4 h-4" strokeWidth={2.5} /> New Client
-        </button>
+        {canManageClients && (
+          <button onClick={openAdd} className="btn-primary flex items-center gap-2">
+            <Plus className="w-4 h-4" strokeWidth={2.5} /> New Client
+          </button>
+        )}
       </div>
 
       <div className="flex gap-2 flex-wrap">
@@ -118,7 +124,7 @@ export default function ClientsPage() {
             </div>
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
               {items.map(c => (
-                <div key={c.id} className="card p-4 hover:shadow-ios-lg transition-shadow cursor-pointer" onClick={() => openEdit(c)}>
+                <div key={c.id} className={`card p-4 transition-shadow ${canManageClients ? 'hover:shadow-ios-lg cursor-pointer' : ''}`} onClick={() => openEdit(c)}>
                   <div className="flex items-start justify-between mb-3">
                     <div className="flex items-center gap-3">
                       <div className={`w-10 h-10 ${typeInfo.bg} rounded-ios flex items-center justify-center text-headline font-bold`}>
@@ -145,7 +151,7 @@ export default function ClientsPage() {
                       className="flex-1 text-center py-1.5 rounded-ios bg-ios-fill text-caption1 font-semibold text-ios-secondary hover:bg-ios-fill2 transition-colors">
                       Projects →
                     </a>
-                    <a href={`/dashboard/tasks?client=${c.id}`}
+                    <a href={`/dashboard/tasks?client=${c.id}&mode=list`}
                       className="flex-1 text-center py-1.5 rounded-ios bg-blue-50 text-caption1 font-semibold text-ios-blue hover:bg-blue-100 transition-colors">
                       Tasks →
                     </a>
@@ -160,7 +166,7 @@ export default function ClientsPage() {
       {filtered.length === 0 && (
         <div className="card p-12 text-center">
           <p className="text-headline font-semibold text-ios-secondary mb-4">No clients yet</p>
-          <button onClick={openAdd} className="btn-primary">Add Client</button>
+          {canManageClients && <button onClick={openAdd} className="btn-primary">Add Client</button>}
         </div>
       )}
 

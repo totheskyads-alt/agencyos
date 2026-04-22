@@ -11,10 +11,9 @@ export default function BugsPage() {
   const [bugs, setBugs] = useState([]);
   const [ideas, setIdeas] = useState([]);
   const [tab, setTab] = useState('bugs');
-  const [form, setForm] = useState(() => {
-    try { const s = localStorage.getItem('sm_bug_draft'); return s ? JSON.parse(s) : EMPTY_BUG; } catch { return EMPTY_BUG; }
-  });
-  const [ideaForm, setIdeaForm] = useState({ title: '', description: '', priority: 'medium' });
+  const [form, setForm] = useState(EMPTY_BUG);
+  const [ideaForm, setIdeaForm] = useState(EMPTY_IDEA);
+  const [draftsLoaded, setDraftsLoaded] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [editingIdeaId, setEditingIdeaId] = useState(null);
   const [submitted, setSubmitted] = useState('');
@@ -24,6 +23,13 @@ export default function BugsPage() {
 
   useEffect(() => {
     load();
+    try {
+      const bugDraft = localStorage.getItem('sm_bug_draft');
+      const ideaDraft = localStorage.getItem('sm_idea_draft');
+      if (bugDraft) setForm(JSON.parse(bugDraft));
+      if (ideaDraft) setIdeaForm(JSON.parse(ideaDraft));
+    } catch {}
+    setDraftsLoaded(true);
     supabase.auth.getUser().then(async ({ data: { user } }) => {
       if (user) {
         setCurrentUserId(user.id);
@@ -33,8 +39,13 @@ export default function BugsPage() {
     });
   }, []);
   useEffect(() => {
+    if (!draftsLoaded) return;
     try { localStorage.setItem('sm_bug_draft', JSON.stringify(form)); } catch {}
-  }, [form]);
+  }, [form, draftsLoaded]);
+  useEffect(() => {
+    if (!draftsLoaded) return;
+    try { localStorage.setItem('sm_idea_draft', JSON.stringify(ideaForm)); } catch {}
+  }, [ideaForm, draftsLoaded]);
 
   async function load() {
     const [{ data: b }, { data: i }] = await Promise.all([
@@ -70,6 +81,7 @@ export default function BugsPage() {
       await supabase.from('ideas').insert({ title: ideaForm.title, description: ideaForm.description, priority: ideaForm.priority, status: 'open', reported_by: currentUserId });
     }
     setIdeaForm(EMPTY_IDEA);
+    try { localStorage.setItem('sm_idea_draft', JSON.stringify(EMPTY_IDEA)); } catch {}
     setSubmitted('idea'); setTimeout(() => setSubmitted(''), 3000);
     load();
   }

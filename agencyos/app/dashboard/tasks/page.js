@@ -2,9 +2,10 @@
 import { useState, useEffect, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
 import Modal from '@/components/Modal';
-import { fmtDate, getElapsed, fmtClock } from '@/lib/utils';
+import { fmtDate, fmtClock } from '@/lib/utils';
 import { useRole } from '@/lib/useRole';
 import { useTimer } from '@/lib/timerContext';
+import { useSearchParams } from 'next/navigation';
 import {
   Plus, Search, ChevronDown, ArrowLeft, MessageSquare,
   Paperclip, Trash2, Send, Archive, Kanban, MoreHorizontal,
@@ -84,7 +85,7 @@ function LabelPill({ label, onRemove }) {
 }
 
 // ─── Task Detail Modal ────────────────────────────────────────────────────────
-function TaskDetail({ task, members, boardColumns, projects, labels: allLabels, activeTimer, elapsed, isPaused, onClose, onSave, onDelete, onStartTimer, onStopTimer, onPauseTimer, currentUser }) {
+function TaskDetail({ task, members, boardColumns, projects, labels: allLabels, activeTimer, elapsed, isPaused, onClose, onSave, onDelete, onStartTimer, onStopTimer, onPauseTimer, onProjectCreated, currentUser }) {
   const isNew = !task?.id;
   const isTimerActive = activeTimer?.task_id === task?.id;
 
@@ -143,7 +144,7 @@ function TaskDetail({ task, members, boardColumns, projects, labels: allLabels, 
 
   async function loadComments() {
     const { data } = await supabase.from('task_comments')
-      .select('*, profiles(full_name,email,id)')
+      .select('*, profiles(full_name,email,id,avatar_url)')
       .eq('task_id', task.id).order('created_at');
     setComments(data || []);
   }
@@ -202,7 +203,7 @@ function TaskDetail({ task, members, boardColumns, projects, labels: allLabels, 
     if (newProjClientId) payload.client_id = newProjClientId;
     const { data } = await supabase.from('projects').insert(payload).select('*, clients(name)').single();
     if (data) {
-      setProjects(prev => [...prev, data].sort((a,b) => a.name.localeCompare(b.name)));
+      onProjectCreated?.(data);
       setForm(p => ({ ...p, project_id: data.id }));
       setShowProjDrop(false);
     }
@@ -481,9 +482,13 @@ function TaskDetail({ task, members, boardColumns, projects, labels: allLabels, 
                   const isEditing = editingCommentId === c.id;
                   return (
                     <div key={c.id} className="flex gap-3 group">
-                      <div className="w-7 h-7 bg-ios-blue rounded-full flex items-center justify-center text-white text-caption2 font-bold shrink-0">
-                        {(c.profiles?.full_name || c.profiles?.email || '?')[0].toUpperCase()}
-                      </div>
+                      {c.profiles?.avatar_url ? (
+                        <img src={c.profiles.avatar_url} alt="avatar" className="w-7 h-7 rounded-full object-cover shrink-0" />
+                      ) : (
+                        <div className="w-7 h-7 bg-ios-blue rounded-full flex items-center justify-center text-white text-caption2 font-bold shrink-0">
+                          {(c.profiles?.full_name || c.profiles?.email || '?')[0].toUpperCase()}
+                        </div>
+                      )}
                       <div className="flex-1 bg-ios-bg rounded-ios p-3">
                         <div className="flex items-center justify-between mb-1">
                           <span className="text-footnote font-semibold">{c.profiles?.full_name || c.profiles?.email}</span>
@@ -635,7 +640,11 @@ function TaskRow({ task, members, boardColumns, taskLabels, activeTimer, elapsed
           title="Archive">
           <Archive className="w-3.5 h-3.5" />
         </button>
-        {assignee && <div className="w-6 h-6 bg-ios-blue rounded-full flex items-center justify-center text-white text-caption2 font-bold">{(assignee.full_name||assignee.email)[0].toUpperCase()}</div>}
+        {assignee && (assignee.avatar_url ? (
+          <img src={assignee.avatar_url} alt="avatar" className="w-6 h-6 rounded-full object-cover shrink-0" />
+        ) : (
+          <div className="w-6 h-6 bg-ios-blue rounded-full flex items-center justify-center text-white text-caption2 font-bold">{(assignee.full_name||assignee.email)[0].toUpperCase()}</div>
+        ))}
       </div>
     </div>
   );
@@ -645,6 +654,10 @@ function TaskRow({ task, members, boardColumns, taskLabels, activeTimer, elapsed
 
 // ─── MAIN PAGE ────────────────────────────────────────────────────────────────
 export default function TasksPage() {
+  const searchParams = useSearchParams();
+  const urlClientId = searchParams.get('client') || '';
+  const urlProjectId = searchParams.get('project') || '';
+  const urlMode = searchParams.get('mode') || '';
   // Persist view in localStorage
   const [mode, setMode] = useState(() => {
     try { return localStorage.getItem(VIEW_KEY) || 'list'; } catch { return 'list'; }
@@ -655,6 +668,7 @@ export default function TasksPage() {
   const [boardColumns, setBoardColumns] = useState([]);
   const [tasks, setTasks] = useState([]);
   const [archivedTasks, setArchivedTasks] = useState([]);
+  const [tasksLoaded, setTasksLoaded] = useState(false);
   const [members, setMembers] = useState([]);
   const [labels, setLabels] = useState([]);
   const [taskLabels, setTaskLabels] = useState({});
@@ -690,6 +704,8 @@ export default function TasksPage() {
   const { isManager, role, profile: userProfile } = useRole();
 
   useEffect(() => {
+    if (urlMode === 'list' || urlMode === 'board' || urlMode === 'archive') updateMode(urlMode);
+    if (urlProjectId) setFilterProject(urlProjectId);
     supabase.auth.getUser().then(({ data: { user } }) => {
       setCurrentUser(user);
       currentUserRef2.current = user;
@@ -716,7 +732,7 @@ export default function TasksPage() {
 
     const [{ data: proj }, { data: mem }, { data: lbl }] = await Promise.all([
       supabase.from('projects').select('*, clients(id,name)').eq('status','active').order('name'),
-      supabase.from('profiles').select('id,full_name,email,role').order('full_name'),
+      supabase.from('profiles').select('id,full_name,email,role,avatar_url').order('full_name'),
       supabase.from('labels').select('*').order('name'),
     ]);
     setProjects(proj||[]); setMembers(mem||[]); setLabels(lbl||[]);
@@ -751,8 +767,8 @@ export default function TasksPage() {
     const myRole = currentProfile?.role || 'operator';
 
     // Get role hierarchy for filtering
-    let activeQ = supabase.from('tasks').select('*, profiles!tasks_assigned_to_fkey(id,full_name,email,role), projects(id,name,color,clients(name))').eq('is_archived',false).order('position');
-    let archivedQ = supabase.from('tasks').select('*, profiles!tasks_assigned_to_fkey(id,full_name,email,role), projects(id,name,color)').eq('is_archived',true).order('archived_at',{ascending:false}).limit(50);
+    let activeQ = supabase.from('tasks').select('*, profiles!tasks_assigned_to_fkey(id,full_name,email,role,avatar_url), projects(id,name,color,client_id,clients(id,name))').or('is_archived.eq.false,is_archived.is.null').order('position');
+    let archivedQ = supabase.from('tasks').select('*, profiles!tasks_assigned_to_fkey(id,full_name,email,role,avatar_url), projects(id,name,color,client_id,clients(id,name))').eq('is_archived',true).order('archived_at',{ascending:false}).limit(100);
 
     // Operator: only own tasks
     if (myRole === 'operator') {
@@ -786,12 +802,40 @@ export default function TasksPage() {
     setTasks((active||[]).filter(t => t.project_id).map(meta));
     setArchivedTasks((archived||[]).filter(t => t.project_id).map(meta));
     setTaskLabels(tl);
+    setTasksLoaded(true);
   }
 
   async function quickArchive(taskId) {
     // Remove from UI immediately
     setTasks(prev => prev.filter(t => t.id !== taskId));
     await supabase.from('tasks').update({ is_archived: true, archived_at: new Date().toISOString() }).eq('id', taskId);
+  }
+
+  async function restoreTask(taskId) {
+    await supabase.from('tasks').update({ is_archived: false, archived_at: null }).eq('id', taskId);
+    await loadTasks();
+  }
+
+  async function moveTaskToPosition(srcId, targetColId, beforeTaskId = null) {
+    const srcTask = tasks.find(t => t.id === srcId);
+    if (!srcTask || !targetColId) return;
+
+    const targetItems = boardTasks
+      .filter(t => t.id !== srcId && t.column_id === targetColId)
+      .sort((a, b) => (a.position ?? 9999) - (b.position ?? 9999));
+    const foundIndex = beforeTaskId ? targetItems.findIndex(t => t.id === beforeTaskId) : -1;
+    const insertAt = beforeTaskId && foundIndex >= 0 ? foundIndex : targetItems.length;
+    const reordered = [...targetItems];
+    reordered.splice(insertAt === -1 ? targetItems.length : insertAt, 0, { ...srcTask, column_id: targetColId });
+
+    setTasks(prev => prev.map(t => {
+      const next = reordered.find(r => r.id === t.id);
+      return next ? { ...t, column_id: targetColId, position: reordered.findIndex(r => r.id === t.id) } : t;
+    }));
+
+    await Promise.all(reordered.map((t, i) =>
+      supabase.from('tasks').update({ column_id: targetColId, position: i }).eq('id', t.id)
+    ));
   }
 
   async function addColumn() {
@@ -862,6 +906,7 @@ export default function TasksPage() {
 
   // Filters
   let visible = tasks;
+  if (urlClientId) visible = visible.filter(t => t.projects?.client_id === urlClientId);
   if (mainFilter !== 'all') visible = visible.filter(t => t.assigned_to===mainFilter);
   if (filterProject) visible = visible.filter(t => t.project_id===filterProject);
   if (filterPriority) visible = visible.filter(t => t.priority===filterPriority);
@@ -878,21 +923,29 @@ export default function TasksPage() {
   // Board: show tasks assigned to the board owner
   const boardOwner = viewingUserId || currentUser?.id;
   let boardTasks = boardOwner ? tasks.filter(t => t.assigned_to === boardOwner) : tasks;
+  if (urlClientId) boardTasks = boardTasks.filter(t => t.projects?.client_id === urlClientId);
   if (filterProject) boardTasks = boardTasks.filter(t => t.project_id===filterProject);
   if (filterPriority) boardTasks = boardTasks.filter(t => t.priority===filterPriority);
   if (filterLabel) boardTasks = boardTasks.filter(t => (taskLabels[t.id]||[]).some(l => l.id===filterLabel));
   if (search) boardTasks = boardTasks.filter(t => t.title?.toLowerCase().includes(search.toLowerCase()));
-  const hasFilters = mainFilter!=='all'||filterProject||filterPriority||filterLabel||search;
+  let visibleArchived = archivedTasks;
+  if (urlClientId) visibleArchived = visibleArchived.filter(t => t.projects?.client_id === urlClientId);
+  if (mainFilter !== 'all') visibleArchived = visibleArchived.filter(t => t.assigned_to===mainFilter);
+  if (filterProject) visibleArchived = visibleArchived.filter(t => t.project_id===filterProject);
+  if (filterPriority) visibleArchived = visibleArchived.filter(t => t.priority===filterPriority);
+  if (filterLabel) visibleArchived = visibleArchived.filter(t => (taskLabels[t.id]||[]).some(l => l.id===filterLabel));
+  if (search) visibleArchived = visibleArchived.filter(t => t.title?.toLowerCase().includes(search.toLowerCase()));
+  const hasFilters = mainFilter!=='all'||filterProject||filterPriority||filterLabel||search||urlClientId;
 
   return (
     <div className="space-y-4">
       {/* Header */}
-      <div className="flex items-center justify-between gap-3">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div>
           <h1 className="text-title2 font-bold text-ios-primary">{mode==='archive' ? 'Archive' : 'Tasks'}</h1>
           <p className="text-subhead text-ios-secondary">{mode==='archive' ? `${archivedTasks.length} archived` : hasFilters ? `${visible.length} of ${tasks.length}` : `${tasks.length} tasks`}</p>
         </div>
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex items-center gap-2 shrink-0 flex-wrap justify-start">
           {/* View toggle */}
           <div className="flex bg-ios-fill rounded-ios p-0.5 gap-0.5">
             <button onClick={() => updateMode('list')} className={`p-2 rounded-ios-sm transition-all ${mode==='list' ? 'bg-white shadow-ios-sm' : ''}`} title="List">
@@ -949,7 +1002,7 @@ export default function TasksPage() {
 
       {/* Filters */}
       {mode !== 'archive' && (
-        <div className="flex items-center gap-2 flex-wrap">
+        <div className="flex items-stretch sm:items-center gap-2 flex-wrap">
           {mode === 'list' && role !== 'operator' && (
             <div className="relative" ref={memberRef}>
               <button onClick={() => setShowMemberDrop(!showMemberDrop)}
@@ -978,17 +1031,17 @@ export default function TasksPage() {
           )}
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-ios-tertiary"/>
-            <input className="input pl-9 w-36 py-2 text-footnote" placeholder="Search..." value={search} onChange={e => setSearch(e.target.value)}/>
+            <input className="input pl-9 w-full sm:w-36 py-2 text-footnote" placeholder="Search..." value={search} onChange={e => setSearch(e.target.value)}/>
           </div>
-          <select className="input py-2 text-footnote w-36" value={filterProject} onChange={e => setFilterProject(e.target.value)}>
+          <select className="input py-2 text-footnote w-full sm:w-36" value={filterProject} onChange={e => setFilterProject(e.target.value)}>
             <option value="">All projects</option>
             {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
           </select>
-          <select className="input py-2 text-footnote w-36" value={filterLabel} onChange={e => setFilterLabel(e.target.value)}>
+          <select className="input py-2 text-footnote w-full sm:w-36" value={filterLabel} onChange={e => setFilterLabel(e.target.value)}>
             <option value="">All labels</option>
             {labels.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
           </select>
-          <select className="input py-2 text-footnote w-32" value={filterPriority} onChange={e => setFilterPriority(e.target.value)}>
+          <select className="input py-2 text-footnote w-full sm:w-32" value={filterPriority} onChange={e => setFilterPriority(e.target.value)}>
             <option value="">Any priority</option>
             {Object.entries(PRIORITY).map(([k,v]) => <option key={k} value={k}>{v.label}</option>)}
           </select>
@@ -1001,8 +1054,14 @@ export default function TasksPage() {
         </div>
       )}
 
+      {!tasksLoaded && (
+        <div className="card p-10 text-center">
+          <p className="text-subhead font-semibold text-ios-secondary">Loading tasks...</p>
+        </div>
+      )}
+
       {/* LIST */}
-      {mode === 'list' && (
+      {tasksLoaded && mode === 'list' && (
         <div className="card overflow-hidden">
           {Object.keys(byProject).length === 0 ? (
             <div className="p-12 text-center">
@@ -1012,6 +1071,7 @@ export default function TasksPage() {
           ) : Object.entries(byProject).map(([pid, { project, tasks: projTasks }]) => {
             const openTasks = projTasks.filter(t => t.status!=='done');
             const doneTasks = projTasks.filter(t => t.status==='done');
+            const archivedForProject = visibleArchived.filter(t => t.project_id === pid);
             const isCollapsed = collapsed[pid];
             return (
               <div key={pid}>
@@ -1059,6 +1119,29 @@ export default function TasksPage() {
                     )}
                   </div>
                 )}
+                {!isCollapsed && archivedForProject.length > 0 && (
+                  <div className="border-t border-ios-separator/20 bg-orange-50/30">
+                    <button onClick={() => setCollapsed(p => ({ ...p, [`arch_${pid}`]: !p[`arch_${pid}`] }))}
+                      className="flex items-center gap-2 w-full px-4 py-2 text-footnote text-ios-orange hover:bg-orange-50">
+                      <ChevronDown className={`w-3.5 h-3.5 transition-transform ${collapsed[`arch_${pid}`] ? '-rotate-90' : ''}`}/>
+                      {collapsed[`arch_${pid}`] ? `Show ${archivedForProject.length} archived tasks` : `Hide ${archivedForProject.length} archived tasks`}
+                    </button>
+                    {!collapsed[`arch_${pid}`] && archivedForProject.map(t => (
+                      <div key={t.id} onClick={() => setTaskModal(t)}
+                        className="flex items-center gap-3 px-4 py-3 border-t border-ios-separator/20 hover:bg-orange-50/60 cursor-pointer opacity-80">
+                        <Archive className="w-4 h-4 text-ios-orange shrink-0"/>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-subhead text-ios-secondary line-through truncate">{t.title}</p>
+                          <p className="text-caption1 text-ios-tertiary">Archived {fmtDate(t.archived_at)}</p>
+                        </div>
+                        <button onClick={e => { e.stopPropagation(); restoreTask(t.id); }}
+                          className="px-2.5 py-1.5 rounded-ios bg-white text-caption1 font-semibold text-ios-blue hover:bg-blue-50">
+                          Restore
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             );
           })}
@@ -1066,8 +1149,8 @@ export default function TasksPage() {
       )}
 
       {/* BOARD */}
-      {mode === 'board' && (
-        <div className="flex gap-3 overflow-x-auto pb-6" style={{ minHeight: '65vh' }}>
+      {tasksLoaded && mode === 'board' && (
+        <div className="flex gap-3 overflow-x-auto pb-4 h-[calc(100vh-230px)] min-h-[520px]">
           {boardColumns.map(col => {
             const knownColIds = new Set(boardColumns.map(c => c.id));
             const isFirstCol = boardColumns[0]?.id === col.id;
@@ -1078,17 +1161,17 @@ export default function TasksPage() {
             const isDragTarget = dragOver===col.id;
             return (
               <div key={col.id}
-                className={`shrink-0 w-72 rounded-ios-lg p-3 transition-all flex flex-col ${isDragTarget ? 'bg-blue-50 ring-2 ring-ios-blue' : dragOverCol === col.id && dragCol !== col.id ? 'ring-2 ring-ios-orange ring-dashed' : 'bg-ios-bg'}`}
+                className={`shrink-0 w-72 rounded-ios-lg p-3 transition-all flex flex-col min-h-0 ${isDragTarget ? 'bg-blue-50 ring-2 ring-ios-blue' : dragOverCol === col.id && dragCol !== col.id ? 'ring-2 ring-ios-orange ring-dashed' : 'bg-ios-bg'}`}
                 onDragOver={e => { e.preventDefault(); if (dragCol) setDragOverCol(col.id); else setDragOver(col.id); }}
                 onDragLeave={() => { setDragOver(null); setDragOverCol(null); }}
-                onDrop={e => { if (dragCol) { reorderColumns(dragCol, col.id); setDragCol(null); setDragOverCol(null); } else { handleDrop(e, col.id); } }}>
+                onDrop={e => { if (dragCol) { reorderColumns(dragCol, col.id); setDragCol(null); setDragOverCol(null); } else { moveTaskToPosition(e.dataTransfer.getData('taskId'), col.id); setDragOver(null); } }}>
                 <ColHeader col={col}
                   onRename={() => { setEditColModal(col); setEditColName(col.name); }}
                   onDelete={() => deleteColumn(col)}
                   onAdd={colId => setTaskModal({ column_id: colId, project_id: filterProject||'', assigned_to: viewingUserId || currentUser?.id || '' })}
                   onDragStart={() => setDragCol(col.id)}
                   onDragEnd={() => { setDragCol(null); setDragOverCol(null); }} />
-                <div className="space-y-2">
+                <div className="space-y-2 flex-1 overflow-y-auto pr-1 min-h-0">
                   {colTasks.map(task => {
                     const pri = PRIORITY[task.priority];
                     const assignee = members.find(m => m.id===task.assigned_to);
@@ -1104,28 +1187,7 @@ export default function TasksPage() {
                           e.preventDefault(); e.stopPropagation();
                           const srcId = e.dataTransfer.getData('taskId');
                           if (!srcId || srcId === task.id) { setDragOverTaskId(null); return; }
-                          const srcTask = tasks.find(t => t.id === srcId);
-                          const targetColId = col.id;
-                          if (srcTask?.column_id === targetColId) {
-                            // Same column — reorder
-                            const colItems = boardTasks.filter(t => t.column_id === targetColId);
-                            const srcIdx = colItems.findIndex(t => t.id === srcId);
-                            const dstIdx = colItems.findIndex(t => t.id === task.id);
-                            if (srcIdx !== -1 && dstIdx !== -1) {
-                              const reordered = [...colItems];
-                              const [moved] = reordered.splice(srcIdx, 1);
-                              reordered.splice(dstIdx, 0, moved);
-                              setTasks(prev => { const others = prev.filter(t => t.column_id !== targetColId); return [...others, ...reordered]; });
-                              await Promise.all(reordered.map((t, i) => supabase.from('tasks').update({ position: i, column_id: targetColId }).eq('id', t.id)));
-                            }
-                          } else {
-                            // Cross-column move — move task here (before this task)
-                            const colItems = boardTasks.filter(t => t.column_id === targetColId);
-                            const dstIdx = colItems.findIndex(t => t.id === task.id);
-                            const insertPos = dstIdx >= 0 ? dstIdx : colItems.length;
-                            setTasks(prev => prev.map(t => t.id === srcId ? { ...t, column_id: targetColId, position: insertPos } : t));
-                            await supabase.from('tasks').update({ column_id: targetColId, position: insertPos }).eq('id', srcId);
-                          }
+                          await moveTaskToPosition(srcId, col.id, task.id);
                           setDragOver(null); setDragOverTaskId(null); setDragTaskId(null);
                         }}
                         onClick={() => setTaskModal(task)}
@@ -1171,11 +1233,13 @@ export default function TasksPage() {
                           </div>
                           <div className="flex items-center gap-1 shrink-0">
                             {task.due_date && <span className="text-[10px] text-ios-tertiary">{new Date(task.due_date).toLocaleDateString('en-US',{day:'numeric',month:'short'})}</span>}
-                            {assignee && (
+                            {assignee && (assignee.avatar_url ? (
+                              <img src={assignee.avatar_url} alt="avatar" className="w-5 h-5 rounded-full object-cover shrink-0" />
+                            ) : (
                               <div className="w-5 h-5 bg-ios-blue rounded-full flex items-center justify-center text-white text-[9px] font-bold shrink-0">
                                 {(assignee.full_name||assignee.email)[0].toUpperCase()}
                               </div>
-                            )}
+                            ))}
                           </div>
                         </div>
 
@@ -1205,8 +1269,7 @@ export default function TasksPage() {
                       e.preventDefault();
                       const srcId = e.dataTransfer.getData('taskId');
                       if (srcId) {
-                        setTasks(prev => prev.map(t => t.id === srcId ? { ...t, column_id: col.id, position: colTasks.length } : t));
-                        await supabase.from('tasks').update({ column_id: col.id, position: colTasks.length }).eq('id', srcId);
+                        await moveTaskToPosition(srcId, col.id);
                         setDragOver(null); setDragTaskId(null);
                       }
                     }}>
@@ -1237,7 +1300,7 @@ export default function TasksPage() {
       )}
 
       {/* ARCHIVE */}
-      {mode === 'archive' && (
+      {tasksLoaded && mode === 'archive' && (
         <div className="card overflow-hidden">
           {archivedTasks.length === 0 ? (
             <div className="p-12 text-center"><Archive className="w-8 h-8 text-ios-label4 mx-auto mb-3"/><p className="text-subhead text-ios-secondary">No archived tasks</p></div>
@@ -1251,7 +1314,11 @@ export default function TasksPage() {
                   <p className="text-subhead text-ios-secondary line-through truncate">{task.title}</p>
                   <p className="text-caption1 text-ios-tertiary">{task.projects?.name} · Archived {fmtDate(task.archived_at)}</p>
                 </div>
-                {assignee && <div className="w-6 h-6 bg-ios-fill rounded-full flex items-center justify-center text-ios-tertiary text-caption2 font-bold">{(assignee.full_name||assignee.email)[0].toUpperCase()}</div>}
+                {assignee && (assignee.avatar_url ? (
+                  <img src={assignee.avatar_url} alt="avatar" className="w-6 h-6 rounded-full object-cover shrink-0 opacity-80" />
+                ) : (
+                  <div className="w-6 h-6 bg-ios-fill rounded-full flex items-center justify-center text-ios-tertiary text-caption2 font-bold">{(assignee.full_name||assignee.email)[0].toUpperCase()}</div>
+                ))}
               </div>
             );
           })}
@@ -1265,6 +1332,7 @@ export default function TasksPage() {
           onClose={() => setTaskModal(null)}
           onSave={() => { setTaskModal(null); loadTasks(); try { localStorage.setItem('sm_tasks_updated', Date.now().toString()); } catch {} }}
           onDelete={() => deleteTask(taskModal.id)}
+          onProjectCreated={project => setProjects(prev => [...prev, project].sort((a,b) => a.name.localeCompare(b.name)))}
           onStartTimer={handleStartTimer} onStopTimer={stopTimer} onPauseTimer={pauseTimer} isPaused={isPaused} />
       )}
 

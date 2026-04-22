@@ -82,7 +82,7 @@ export default function DashboardPage() {
       supabase.from('time_entries').select('duration_seconds').eq('user_id',user.id).not('end_time','is',null).gte('created_at',monthStart),
       supabase.from('clients').select('id'),
       supabase.from('projects').select('id').eq('status','active'),
-      supabase.from('tasks').select('id,assigned_to').eq('is_archived',false),
+      supabase.from('tasks').select('id,assigned_to').or('is_archived.eq.false,is_archived.is.null'),
       supabase.from('time_entries').select('duration_seconds,description,projects(name,color,clients(name))').eq('user_id',user.id).not('end_time','is',null).order('created_at',{ascending:false}).limit(5),
     ]);
 
@@ -130,9 +130,18 @@ export default function DashboardPage() {
     <div className="space-y-4">
       {/* Greeting */}
       <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-title2 font-bold text-ios-primary">{greeting()}, {profile?.nickname || profile?.full_name?.split(' ')[0] || 'there'} 👋</h1>
-          <p className="text-footnote text-ios-secondary">{dayOfWeek}</p>
+        <div className="flex items-center gap-3 min-w-0">
+          {profile?.avatar_url ? (
+            <img src={profile.avatar_url} alt="avatar" className="w-12 h-12 rounded-full object-cover shrink-0 ring-2 ring-ios-separator/60" />
+          ) : (
+            <div className="w-12 h-12 rounded-full bg-ios-blue text-white flex items-center justify-center text-headline font-bold shrink-0">
+              {(profile?.full_name || profile?.email || 'U').split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2)}
+            </div>
+          )}
+          <div className="min-w-0">
+            <h1 className="text-title2 font-bold text-ios-primary truncate">{greeting()}, {profile?.nickname || profile?.full_name?.split(' ')[0] || 'there'} 👋</h1>
+            <p className="text-footnote text-ios-secondary">{dayOfWeek}</p>
+          </div>
         </div>
         <div className="flex gap-3">
           <Link href="/dashboard/clients" className="card px-4 py-3 text-center hover:shadow-ios-lg transition-shadow">
