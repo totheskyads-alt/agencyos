@@ -67,9 +67,41 @@ function timeAgo(value) {
   return new Date(value).toLocaleDateString('en-US', { day: 'numeric', month: 'short' });
 }
 
+function playNotificationSound() {
+  if (typeof window === 'undefined') return;
+  const AudioContext = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContext) return;
+
+  const context = new AudioContext();
+  const master = context.createGain();
+  master.gain.setValueAtTime(0.0001, context.currentTime);
+  master.gain.exponentialRampToValueAtTime(0.045, context.currentTime + 0.02);
+  master.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + 0.72);
+  master.connect(context.destination);
+
+  [660, 880].forEach((frequency, index) => {
+    const start = context.currentTime + index * 0.13;
+    const osc = context.createOscillator();
+    const gain = context.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(frequency, start);
+    gain.gain.setValueAtTime(0.0001, start);
+    gain.gain.exponentialRampToValueAtTime(0.8, start + 0.03);
+    gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.34);
+    osc.connect(gain);
+    gain.connect(master);
+    osc.start(start);
+    osc.stop(start + 0.36);
+  });
+
+  setTimeout(() => context.close().catch(() => {}), 900);
+}
+
 export default function NotificationBell() {
   const router = useRouter();
   const ref = useRef(null);
+  const initializedRef = useRef(false);
+  const latestSeenRef = useRef(null);
   const [open, setOpen] = useState(false);
   const [userId, setUserId] = useState(null);
   const [items, setItems] = useState([]);
@@ -90,6 +122,30 @@ export default function NotificationBell() {
     return () => document.removeEventListener('mousedown', close);
   }, []);
 
+  useEffect(() => {
+    if (!userId) return;
+    const channel = supabase
+      .channel(`notifications-${userId}`)
+      .on('postgres_changes', {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'notifications',
+        filter: `user_id=eq.${userId}`,
+      }, payload => {
+        const notification = payload.new;
+        setItems(prev => [notification, ...prev.filter(n => n.id !== notification.id)].slice(0, 20));
+        playNotificationSound();
+      })
+      .subscribe();
+
+    const interval = setInterval(() => load(userId), 20000);
+
+    return () => {
+      clearInterval(interval);
+      supabase.removeChannel(channel);
+    };
+  }, [userId]);
+
   async function load(uid = userId) {
     if (!uid) return;
     const { data, error } = await supabase
@@ -98,7 +154,44 @@ export default function NotificationBell() {
       .eq('user_id', uid)
       .order('created_at', { ascending: false })
       .limit(20);
-    if (!error) setItems(data || []);
+    if (!error) {
+      const nextItems = data || [];
+      const newest = nextItems[0];
+      if (initializedRef.current && newest?.id && latestSeenRef.current && newest.id !== latestSeenRef.current && !newest.read_at) {
+        playNotificationSound();
+      }
+      latestSeenRef.current = newest?.id || null;
+      initializedRef.current = true;
+      setItems(nextItems);
+    }
+  }
+
+  async function destinationFor(notification) {
+    if (notification.type === 'task_assigned' && notification.entity_id) {
+      return `/dashboard/tasks?task=${notification.entity_id}&mode=list`;
+    }
+    if (notification.type === 'project_assigned' && notification.entity_id) {
+      return `/dashboard/projects?project=${notification.entity_id}`;
+    }
+    if (notification.type === 'comment_mention' && notification.entity_id) {
+      const { data } = await supabase
+        .from('task_comments')
+        .select('id,task_id,tasks(project_id)')
+        .eq('id', notification.entity_id)
+        .single();
+      if (data?.task_id) {
+        return `/dashboard/tasks?task=${data.task_id}&tab=comments&comment=${notification.entity_id}&mode=list${data.tasks?.project_id ? `&project=${data.tasks.project_id}` : ''}`;
+      }
+    }
+    if (notification.type === 'invoice_due' && notification.entity_id) {
+      const { data } = await supabase
+        .from('projects')
+        .select('id,client_id')
+        .eq('id', notification.entity_id)
+        .single();
+      if (data?.client_id) return `/dashboard/billing?newInvoice=1&client=${data.client_id}&project=${data.id}`;
+    }
+    return notification.entity_url;
   }
 
   async function markRead(notification) {
@@ -107,10 +200,18 @@ export default function NotificationBell() {
       setItems(prev => prev.map(n => n.id === notification.id ? { ...n, read_at: readAt } : n));
       await supabase.from('notifications').update({ read_at: readAt }).eq('id', notification.id);
     }
-    if (notification.entity_url) {
+    const destination = await destinationFor(notification);
+    if (destination) {
       setOpen(false);
-      router.push(notification.entity_url);
+      router.push(destination);
     }
+  }
+
+  async function markOnlyRead(notification) {
+    if (notification.read_at) return;
+    const readAt = new Date().toISOString();
+    setItems(prev => prev.map(n => n.id === notification.id ? { ...n, read_at: readAt } : n));
+    await supabase.from('notifications').update({ read_at: readAt }).eq('id', notification.id);
   }
 
   async function markAllRead() {
@@ -120,7 +221,7 @@ export default function NotificationBell() {
   }
 
   return (
-    <div ref={ref} className="fixed top-3 right-4 z-50 lg:top-4 lg:right-6">
+    <div ref={ref} className="fixed top-8 right-4 -translate-y-1/2 z-50 lg:right-6">
       <button onClick={() => { setOpen(v => !v); if (!open) load(); }}
         className={`relative w-11 h-11 rounded-ios-lg bg-white/95 backdrop-blur-ios border border-ios-separator/40 shadow-ios flex items-center justify-center transition-all hover:-translate-y-0.5 hover:shadow-ios-lg active:scale-95 ${unread > 0 ? 'text-ios-blue ring-4 ring-blue-50' : 'text-ios-secondary hover:text-ios-primary'}`}
         title="Notifications">
@@ -170,13 +271,15 @@ export default function NotificationBell() {
               const style = styleFor(n.type);
               const Icon = style.icon;
               return (
-                <button key={n.id} onClick={() => markRead(n)}
-                  className={`relative w-full text-left p-3 rounded-ios-lg transition-all mb-1 border ${n.read_at ? 'border-transparent hover:bg-ios-bg opacity-75' : 'bg-white border-blue-100 shadow-ios-sm hover:shadow-ios'}`}>
+                <div key={n.id}
+                  className={`relative w-full p-3 rounded-ios-lg transition-all mb-1 border ${n.read_at ? 'border-transparent hover:bg-ios-bg opacity-75' : 'bg-white border-blue-100 shadow-ios-sm hover:shadow-ios'}`}>
                   <div className="flex items-start gap-3">
-                    <span className={`w-9 h-9 rounded-ios flex items-center justify-center shrink-0 ring-1 ${style.bg} ${style.text} ${style.ring}`}>
+                    <button onClick={() => markRead(n)}
+                      className={`w-9 h-9 rounded-ios flex items-center justify-center shrink-0 ring-1 ${style.bg} ${style.text} ${style.ring}`}
+                      title="Open notification">
                       <Icon className="w-4 h-4" />
-                    </span>
-                    <div className="min-w-0 flex-1">
+                    </button>
+                    <button onClick={() => markRead(n)} className="min-w-0 flex-1 text-left" title="Open notification">
                       <div className="flex items-center justify-between gap-2 mb-0.5">
                         <span className="text-[10px] font-bold uppercase text-ios-tertiary">{labelFor(n.type)}</span>
                         <span className="inline-flex items-center gap-1 text-[10px] text-ios-tertiary shrink-0">
@@ -185,10 +288,18 @@ export default function NotificationBell() {
                       </div>
                       <p className={`text-footnote text-ios-primary truncate ${n.read_at ? 'font-semibold' : 'font-bold'}`}>{n.title}</p>
                       {n.body && <p className="text-caption1 text-ios-secondary line-clamp-2 mt-0.5">{n.body}</p>}
-                    </div>
-                    {!n.read_at && <span className="mt-1.5 w-2 h-2 rounded-full bg-ios-blue shrink-0" />}
+                    </button>
+                    {n.read_at ? (
+                      <span className="mt-1.5 w-2 h-2 rounded-full bg-ios-tertiary/60 shrink-0" />
+                    ) : (
+                      <button onClick={() => markOnlyRead(n)}
+                        className="mt-0.5 w-7 h-7 rounded-ios bg-blue-50 text-ios-blue hover:bg-blue-100 flex items-center justify-center shrink-0 transition-colors"
+                        title="Mark read">
+                        <CheckCheck className="w-3.5 h-3.5" />
+                      </button>
+                    )}
                   </div>
-                </button>
+                </div>
               );
             })}
           </div>

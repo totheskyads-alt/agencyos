@@ -42,7 +42,7 @@ export async function createTaskAssignedNotification({ task, assignedUserId, act
     body: task.title || 'You received a new task.',
     entityType: 'task',
     entityId: task.id,
-    entityUrl: `/dashboard/tasks?mode=list&project=${task.project_id || ''}`,
+    entityUrl: `/dashboard/tasks?task=${task.id}&mode=list${task.project_id ? `&project=${task.project_id}` : ''}`,
     eventKey: `task_assigned:${task.id}:${assignedUserId}`,
   });
 }
@@ -57,7 +57,7 @@ export async function createProjectAssignedNotification({ projectId, projectName
     body: projectName ? `You were added to ${projectName}.` : 'You were added to a project.',
     entityType: 'project',
     entityId: projectId,
-    entityUrl: `/dashboard/projects`,
+    entityUrl: `/dashboard/projects?project=${projectId}`,
     eventKey: `project_assigned:${projectId}:${userId}`,
   });
 }
@@ -72,7 +72,7 @@ export async function createCommentMentionNotification({ task, commentId, mentio
     body: task.title || 'A task comment mentioned you.',
     entityType: 'task_comment',
     entityId: commentId,
-    entityUrl: `/dashboard/tasks?mode=list&project=${task.project_id || ''}`,
+    entityUrl: `/dashboard/tasks?task=${task.id}&tab=comments&comment=${commentId}&mode=list${task.project_id ? `&project=${task.project_id}` : ''}`,
     eventKey: `comment_mention:${commentId}:${mentionedUserId}`,
   });
 }
@@ -143,7 +143,7 @@ export async function ensureBillingReminderNotifications(adminUserId) {
       body: `${p.clients?.name || 'Client'}${p.name ? ` · ${p.name}` : ''}`,
       entityType: 'project',
       entityId: p.id,
-      entityUrl: '/dashboard/billing',
+      entityUrl: `/dashboard/billing?newInvoice=1&client=${p.client_id}${p.id ? `&project=${p.id}` : ''}`,
       eventKey: `invoice_due:${year}:${month}:${p.id}`,
     })));
 }

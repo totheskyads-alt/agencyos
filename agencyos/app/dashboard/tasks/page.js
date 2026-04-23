@@ -116,7 +116,7 @@ function LabelPill({ label, onRemove }) {
 }
 
 // ─── Task Detail Modal ────────────────────────────────────────────────────────
-function TaskDetail({ task, members, boardColumns, projects, labels: allLabels, activeTimer, elapsed, isPaused, onClose, onSave, onDelete, onStartTimer, onStopTimer, onPauseTimer, onProjectCreated, currentUser }) {
+function TaskDetail({ task, members, boardColumns, projects, labels: allLabels, activeTimer, elapsed, isPaused, initialTab, onClose, onSave, onDelete, onStartTimer, onStopTimer, onPauseTimer, onProjectCreated, currentUser }) {
   const isNew = !task?.id;
   const isTimerActive = activeTimer?.task_id === task?.id;
 
@@ -138,7 +138,7 @@ function TaskDetail({ task, members, boardColumns, projects, labels: allLabels, 
   const [editingCommentText, setEditingCommentText] = useState('');
   const [loading, setLoading] = useState(false);
   const [sending, setSending] = useState(false);
-  const [tab, setTab] = useState('details');
+  const [tab, setTab] = useState(initialTab || 'details');
   const [showProjDrop, setShowProjDrop] = useState(false);
   const [projSearch, setProjSearch] = useState('');
   const [showNewProj, setShowNewProj] = useState(false);
@@ -160,6 +160,10 @@ function TaskDetail({ task, members, boardColumns, projects, labels: allLabels, 
   useEffect(() => {
     if (task?.id) { loadComments(); loadLabels(); }
   }, [task?.id]);
+
+  useEffect(() => {
+    if (initialTab) setTab(initialTab);
+  }, [initialTab, task?.id]);
 
   useEffect(() => {
     if (!form.column_id && boardColumns.length > 0)
@@ -773,6 +777,8 @@ export default function TasksPage() {
   const urlClientId = searchParams.get('client') || '';
   const urlProjectId = searchParams.get('project') || '';
   const urlMode = searchParams.get('mode') || '';
+  const urlTaskId = searchParams.get('task') || '';
+  const urlTab = searchParams.get('tab') || '';
   // Persist view in localStorage
   const [mode, setMode] = useState(() => {
     try { return localStorage.getItem(VIEW_KEY) || 'list'; } catch { return 'list'; }
@@ -846,6 +852,17 @@ export default function TasksPage() {
     document.addEventListener('mousedown', h);
     return () => document.removeEventListener('mousedown', h);
   }, []);
+
+  useEffect(() => {
+    if (!tasksLoaded || !urlTaskId) return;
+    const target = [...tasks, ...archivedTasks].find(t => t.id === urlTaskId);
+    if (!target) return;
+    if (taskModal?.id !== target.id) setTaskModal(target);
+    if (target.project_id) setFilterProject(target.project_id);
+    if (target.is_archived) updateMode('archive');
+    else if (urlMode === 'board') updateMode('board');
+    else updateMode('list');
+  }, [tasksLoaded, urlTaskId, urlMode, tasks, archivedTasks]);
 
   async function loadAll(targetUserId) {
     const accessInfo = await getProjectAccess();
@@ -1137,7 +1154,10 @@ export default function TasksPage() {
               <Archive className="w-4 h-4 text-ios-secondary" />
             </button>
           </div>
-          {mode === 'board' && (role === 'admin' || role === 'manager') && allMembers.length > 1 && (
+        </div>
+        {mode === 'board' && (role === 'admin' || role === 'manager') && allMembers.length > 1 && (
+          <div className="flex flex-col gap-1.5 border-t border-ios-separator/30 pt-3">
+            <p className="text-caption2 font-bold uppercase text-ios-tertiary">Boards</p>
             <div className="flex items-center gap-2 overflow-x-auto pb-1 max-w-full">
               {[{ id: currentUser?.id, label: 'My Board' }, ...allMembers
                 .filter(m => m.id !== currentUser?.id && (role === 'admin' || m.role !== 'admin'))
@@ -1151,14 +1171,14 @@ export default function TasksPage() {
                       await loadColumnsForUser(item.id, currentUser?.id);
                       await loadTasks();
                     }}
-                    className={`px-3.5 py-1.5 rounded-full text-footnote font-semibold whitespace-nowrap transition-all ${active ? 'bg-ios-blue text-white shadow-ios-sm' : 'bg-ios-fill text-ios-secondary hover:bg-ios-fill2'}`}>
+                    className={`px-3.5 py-1.5 rounded-full text-footnote font-semibold whitespace-nowrap transition-all ${active ? 'bg-ios-blue text-white shadow-ios-sm' : 'bg-white border border-ios-separator/40 text-ios-secondary hover:bg-ios-fill'}`}>
                     {item.label}
                   </button>
                 );
               })}
             </div>
-          )}
-        </div>
+          </div>
+        )}
       </div>
 
       {/* Filters */}
@@ -1564,6 +1584,7 @@ export default function TasksPage() {
       {taskModal !== null && (
         <TaskDetail task={taskModal} members={members} boardColumns={boardColumns} projects={projects} labels={labels}
           activeTimer={activeTimer} elapsed={elapsed} currentUser={currentUser}
+          initialTab={urlTab === 'comments' ? 'comments' : undefined}
           onClose={() => setTaskModal(null)}
           onSave={() => { setTaskModal(null); loadTasks(); try { localStorage.setItem('sm_tasks_updated', Date.now().toString()); } catch {} }}
           onDelete={() => deleteTask(taskModal.id)}

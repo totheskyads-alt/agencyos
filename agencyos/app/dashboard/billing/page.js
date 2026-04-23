@@ -1,5 +1,6 @@
 'use client';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import Modal from '@/components/Modal';
 import { fmtCurrency, fmtDate, parseUTC } from '@/lib/utils';
@@ -128,6 +129,12 @@ function sortNewestFirst(a, b) {
 }
 
 export default function BillingPage() {
+  const searchParams = useSearchParams();
+  const handledActionRef = useRef('');
+  const urlActionKey = searchParams.toString();
+  const urlNewInvoice = searchParams.get('newInvoice') === '1';
+  const urlClientId = searchParams.get('client') || '';
+  const urlInvoiceId = searchParams.get('invoice') || '';
   const [bills, setBills] = useState([]);
   const [expenses, setExpenses] = useState([]);
   const [clients, setClients] = useState([]);
@@ -146,6 +153,25 @@ export default function BillingPage() {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => { load(); }, []);
+
+  useEffect(() => {
+    if (!urlActionKey || handledActionRef.current === urlActionKey) return;
+    if (urlInvoiceId && bills.length > 0) {
+      const invoice = bills.find(b => b.id === urlInvoiceId);
+      if (invoice) {
+        setMainTab('invoices');
+        openEditInv(invoice);
+        handledActionRef.current = urlActionKey;
+      }
+      return;
+    }
+    if (urlNewInvoice && clients.length > 0) {
+      setMainTab('invoices');
+      openNewInvoice();
+      if (urlClientId && clients.some(c => c.id === urlClientId)) applyClientBillingData(urlClientId);
+      handledActionRef.current = urlActionKey;
+    }
+  }, [urlActionKey, urlNewInvoice, urlClientId, urlInvoiceId, bills, clients]);
 
   async function load() {
     const [{ data: b }, { data: c }, { data: e }] = await Promise.all([

@@ -39,6 +39,7 @@ export default function ProjectsPage() {
   const [selectedMemberIds, setSelectedMemberIds] = useState([]);
   const searchParams = useSearchParams();
   const clientFilter = searchParams.get('client') || '';
+  const projectFilter = searchParams.get('project') || '';
   const { isAdmin, can } = useRole();
   const canManageProjects = can('canManageProjects');
 
@@ -48,6 +49,15 @@ export default function ProjectsPage() {
     const client = clients.find(c => c.id === clientFilter);
     if (client) setSearch(client.name);
   }, [clientFilter, clients]);
+
+  useEffect(() => {
+    if (!projectFilter || projects.length === 0) return;
+    const project = projects.find(p => p.id === projectFilter);
+    if (!project) return;
+    setActiveTab(project.status === 'archived' ? 'archived' : 'active');
+    setSearch(project.name || '');
+    if (canManageProjects && selected?.id !== project.id) openEdit(project);
+  }, [projectFilter, projects, canManageProjects, selected?.id]);
 
   async function load() {
     const accessInfo = await getProjectAccess();
