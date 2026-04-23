@@ -57,15 +57,21 @@ export default function TimerPage() {
 
 
 
-  function restartFromEntry(entry) {
-    // Open start popup pre-filled — safer than auto-starting
-    const projName = projects.find(p => p.id === entry.project_id)?.name || '';
-    setStartForm({
-      project_id: entry.project_id || '',
-      description: entry.description || entry.tasks?.title || '',
-    });
-    setStartProjSearch(projName);
-    setShowStart(true);
+  async function restartFromEntry(entry) {
+    if (!entry.project_id || startingTimer) return;
+    setStartingTimer(true);
+    try {
+      const result = await startTimer({
+        projectId: entry.project_id,
+        taskId: entry.task_id || null,
+        description: entry.description || entry.tasks?.title || null,
+      });
+      if (result && user) setTimeout(() => loadData(user), 600);
+    } catch (err) {
+      console.error('Restart error:', err);
+    } finally {
+      setStartingTimer(false);
+    }
   }
 
   async function handleStartTimer() {

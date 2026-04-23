@@ -3,7 +3,7 @@ import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import Modal from '@/components/Modal';
 import { fmtCurrency, fmtDate, parseUTC } from '@/lib/utils';
-import { Plus, Search, AlertCircle, CheckCircle, Clock, FileText, Euro, ChevronDown, Trash2, TrendingDown } from 'lucide-react';
+import { Plus, Search, AlertCircle, CheckCircle, Clock, FileText, Euro, Trash2, TrendingDown, Download, Calculator } from 'lucide-react';
 
 const INVOICE_STATUS = {
   draft:   { label: 'Draft',    color: 'badge-gray',   icon: FileText },
@@ -34,8 +34,72 @@ const RANGES = [
   { key: 'all',    label: 'All time' },
 ];
 
-const emptyInv = { client_id:'', invoice_number:'', amount:'', month: new Date().getMonth()+1, year: new Date().getFullYear(), issue_date:'', due_date:'', paid_date:'', status:'draft', notes:'' };
+const CURRENCIES = {
+  EUR: { label: 'Euro', symbol: 'EUR', defaultRate: 1 },
+  RON: { label: 'Romanian Leu', symbol: 'RON', defaultRate: 4.97 },
+  MDL: { label: 'Moldovan Leu', symbol: 'MDL', defaultRate: 19.30 },
+  USD: { label: 'US Dollar', symbol: 'USD', defaultRate: 1.08 },
+};
+
+const emptyInv = {
+  client_id:'',
+  invoice_number:'',
+  amount:'',
+  invoice_currency:'EUR',
+  exchange_rate:'1',
+  month: new Date().getMonth()+1,
+  year: new Date().getFullYear(),
+  issue_date:'',
+  due_date:'',
+  paid_date:'',
+  status:'draft',
+  tax_rate:'0',
+  invoice_description:'',
+  issuer_name:'',
+  issuer_details:'',
+  client_billing_details:'',
+  notes:''
+};
 const emptyExp = { category:'Salaries', description:'', amount:'', month: new Date().getMonth()+1, year: new Date().getFullYear(), date:'' };
+
+function roundMoney(value) {
+  return Math.round((Number(value) || 0) * 100) / 100;
+}
+
+function fmtInvoiceCurrency(amount, currency = 'EUR') {
+  if (amount == null) return '-';
+  return new Intl.NumberFormat('ro-RO', {
+    style: 'currency',
+    currency,
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(Number(amount) || 0);
+}
+
+function normalizeInvoiceForm(b = {}) {
+  const amountEur = b.amount ?? '';
+  const currency = b.invoice_currency || 'EUR';
+  const rate = b.exchange_rate || CURRENCIES[currency]?.defaultRate || 1;
+  return {
+    client_id: b.client_id || '',
+    invoice_number: b.invoice_number || '',
+    amount: amountEur,
+    invoice_currency: currency,
+    exchange_rate: rate,
+    month: b.month || new Date().getMonth()+1,
+    year: b.year || new Date().getFullYear(),
+    issue_date: b.issue_date || '',
+    due_date: b.due_date || '',
+    paid_date: b.paid_date || '',
+    status: b.status || 'draft',
+    tax_rate: b.tax_rate ?? '0',
+    invoice_description: b.invoice_description || '',
+    issuer_name: b.issuer_name || '',
+    issuer_details: b.issuer_details || '',
+    client_billing_details: b.client_billing_details || '',
+    notes: b.notes || ''
+  };
+}
 
 export default function BillingPage() {
   const [bills, setBills] = useState([]);
@@ -128,9 +192,37 @@ export default function BillingPage() {
 
   async function saveInvoice() {
     setLoading(true);
-    const payload = { ...invForm, amount: parseFloat(invForm.amount)||0, month: parseInt(invForm.month), year: parseInt(invForm.year), client_id: invForm.client_id||null, issue_date: invForm.issue_date||null, due_date: invForm.due_date||null, paid_date: invForm.paid_date||null, invoice_number: invForm.invoice_number||null };
-    if (selectedInv) await supabase.from('billing').update(payload).eq('id', selectedInv.id);
-    else await supabase.from('billing').insert(payload);
+    const amountEur = roundMoney(parseFloat(invForm.amount) || 0);
+    const exchangeRate = invForm.invoice_currency === 'EUR' ? 1 : (parseFloat(invForm.exchange_rate) || CURRENCIES[invForm.invoice_currency]?.defaultRate || 1);
+    const displayAmount = roundMoney(amountEur * exchangeRate);
+    const payload = {
+      ...invForm,
+      amount: amountEur,
+      display_amount: displayAmount,
+      exchange_rate: exchangeRate,
+      tax_rate: parseFloat(invForm.tax_rate) || 0,
+      month: parseInt(invForm.month),
+      year: parseInt(invForm.year),
+      client_id: invForm.client_id||null,
+      issue_date: invForm.issue_date||null,
+      due_date: invForm.due_date||null,
+      paid_date: invForm.paid_date||null,
+      invoice_number: invForm.invoice_number||null,
+      invoice_currency: invForm.invoice_currency || 'EUR',
+      invoice_description: invForm.invoice_description || null,
+      issuer_name: invForm.issuer_name || null,
+      issuer_details: invForm.issuer_details || null,
+      client_billing_details: invForm.client_billing_details || null,
+    };
+    const { error } = selectedInv
+      ? await supabase.from('billing').update(payload).eq('id', selectedInv.id)
+      : await supabase.from('billing').insert(payload);
+    if (error) {
+      console.error(error);
+      alert('Invoice could not be saved. Run the Supabase migration first, then try again.');
+      setLoading(false);
+      return;
+    }
     setInvModal(false); setLoading(false); load();
   }
 
@@ -160,7 +252,7 @@ export default function BillingPage() {
   }
 
   function openEditInv(b) {
-    setInvForm({ client_id: b.client_id||'', invoice_number: b.invoice_number||'', amount: b.amount||'', month: b.month||new Date().getMonth()+1, year: b.year||new Date().getFullYear(), issue_date: b.issue_date||'', due_date: b.due_date||'', paid_date: b.paid_date||'', status: b.status||'draft', notes: b.notes||'' });
+    setInvForm(normalizeInvoiceForm(b));
     setSelectedInv(b); setInvModal(true);
   }
 
@@ -170,6 +262,11 @@ export default function BillingPage() {
   }
 
   const years = Array.from({length:3},(_,i)=>new Date().getFullYear()-i);
+  const invoicePreviewEur = roundMoney(parseFloat(invForm.amount) || 0);
+  const invoicePreviewRate = invForm.invoice_currency === 'EUR'
+    ? 1
+    : (parseFloat(invForm.exchange_rate) || CURRENCIES[invForm.invoice_currency]?.defaultRate || 1);
+  const invoicePreviewDisplay = roundMoney(invoicePreviewEur * invoicePreviewRate);
 
   return (
     <div className="space-y-5">
@@ -259,6 +356,8 @@ export default function BillingPage() {
               const st = INVOICE_STATUS[b.status]||INVOICE_STATUS.draft;
               const Icon = st.icon;
               const ct = CLIENT_TYPES[b.clients?.client_type];
+              const invoiceCurrency = b.invoice_currency || 'EUR';
+              const invoiceAmount = b.display_amount ?? b.amount;
               return (
                 <div key={b.id} onClick={() => openEditInv(b)}
                   className={`list-row hover:bg-ios-bg cursor-pointer ${b.status==='overdue' ? 'border-l-2 border-ios-red' : ''}`}>
@@ -273,10 +372,18 @@ export default function BillingPage() {
                       <span className="text-footnote text-ios-secondary">{MONTHS_FULL[(b.month||1)-1]} {b.year}</span>
                       {b.due_date && <span className={`text-footnote ${b.status==='overdue' ? 'text-ios-red font-semibold' : 'text-ios-secondary'}`}>Due: {fmtDate(b.due_date)}</span>}
                       {b.paid_date && <span className="text-footnote text-ios-green">Paid: {fmtDate(b.paid_date)}</span>}
+                      {invoiceCurrency !== 'EUR' && <span className="text-footnote text-ios-tertiary">Internal: {fmtCurrency(b.amount)}</span>}
                     </div>
                   </div>
                   <div className="flex items-center gap-2 shrink-0" onClick={e => e.stopPropagation()}>
-                    <p className="text-subhead font-bold">{fmtCurrency(b.amount)}</p>
+                    <div className="text-right">
+                      <p className="text-subhead font-bold">{fmtInvoiceCurrency(invoiceAmount, invoiceCurrency)}</p>
+                      {invoiceCurrency !== 'EUR' && <p className="text-caption1 text-ios-tertiary">{fmtCurrency(b.amount)} base</p>}
+                    </div>
+                    <a href={`/invoice/${b.id}`} target="_blank" rel="noreferrer"
+                      className="px-2.5 py-1.5 bg-blue-50 text-ios-blue rounded-ios text-caption1 font-semibold hover:bg-blue-100 whitespace-nowrap inline-flex items-center gap-1">
+                      <Download className="w-3 h-3" /> PDF
+                    </a>
                     {b.status!=='paid' && (
                       <button onClick={() => quickPaid(b.id)} className="px-2.5 py-1.5 bg-green-50 text-ios-green rounded-ios text-caption1 font-semibold hover:bg-green-100 whitespace-nowrap">✓ Paid</button>
                     )}
@@ -464,8 +571,17 @@ export default function BillingPage() {
 
       {/* Invoice Modal */}
       {invModal && (
-        <Modal title={selectedInv ? 'Edit Invoice' : 'New Invoice'} onClose={() => setInvModal(false)} size="lg">
+        <Modal title={selectedInv ? 'Edit Invoice' : 'New Invoice'} onClose={() => setInvModal(false)} size="xl">
           <div className="space-y-4">
+            <div className="bg-blue-50 border border-blue-100 rounded-ios-lg p-4 flex items-start gap-3">
+              <Calculator className="w-5 h-5 text-ios-blue shrink-0 mt-0.5" />
+              <div>
+                <p className="text-subhead font-semibold text-ios-primary">Internal accounting stays in EUR</p>
+                <p className="text-footnote text-ios-secondary mt-0.5">
+                  Reports use {fmtCurrency(invoicePreviewEur)}. The invoice will show {fmtInvoiceCurrency(invoicePreviewDisplay, invForm.invoice_currency)}.
+                </p>
+              </div>
+            </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="col-span-2">
                 <label className="input-label">Client *</label>
@@ -479,7 +595,29 @@ export default function BillingPage() {
                 </select>
               </div>
               <div><label className="input-label">Invoice #</label><input className="input" placeholder="2025-001" value={invForm.invoice_number} onChange={e => setInvForm({...invForm, invoice_number: e.target.value})}/></div>
-              <div><label className="input-label">Amount (€) *</label><input className="input" type="number" placeholder="500" value={invForm.amount} onChange={e => setInvForm({...invForm, amount: e.target.value})}/></div>
+              <div><label className="input-label">Internal amount (EUR) *</label><input className="input" type="number" step="0.01" placeholder="500" value={invForm.amount} onChange={e => setInvForm({...invForm, amount: e.target.value})}/></div>
+              <div>
+                <label className="input-label">Invoice currency</label>
+                <select className="input" value={invForm.invoice_currency} onChange={e => {
+                  const currency = e.target.value;
+                  const defaultRate = CURRENCIES[currency]?.defaultRate || 1;
+                  setInvForm({...invForm, invoice_currency: currency, exchange_rate: String(defaultRate)});
+                }}>
+                  {Object.entries(CURRENCIES).map(([code, info]) => <option key={code} value={code}>{code} - {info.label}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="input-label">Exchange rate</label>
+                <input className="input" type="number" step="0.000001" disabled={invForm.invoice_currency==='EUR'} value={invForm.invoice_currency==='EUR' ? '1' : invForm.exchange_rate}
+                  onChange={e => setInvForm({...invForm, exchange_rate: e.target.value})}/>
+                <p className="text-caption1 text-ios-tertiary mt-1">1 EUR = {invForm.invoice_currency === 'EUR' ? '1' : (invForm.exchange_rate || '0')} {invForm.invoice_currency}</p>
+              </div>
+              <div>
+                <label className="input-label">Invoice total</label>
+                <div className="input bg-white border border-ios-separator/60">
+                  {fmtInvoiceCurrency(invoicePreviewDisplay, invForm.invoice_currency)}
+                </div>
+              </div>
               <div><label className="input-label">Month</label>
                 <select className="input" value={invForm.month} onChange={e => setInvForm({...invForm, month: e.target.value})}>
                   {MONTHS_FULL.map((m,i) => <option key={i} value={i+1}>{m}</option>)}
@@ -504,10 +642,23 @@ export default function BillingPage() {
               {invForm.status==='paid' && (
                 <div className="col-span-2"><label className="input-label">Payment Date</label><input className="input" type="date" value={invForm.paid_date} onChange={e => setInvForm({...invForm, paid_date: e.target.value})}/></div>
               )}
-              <div className="col-span-2"><label className="input-label">Notess</label><textarea className="input" rows={2} value={invForm.notes} onChange={e => setInvForm({...invForm, notes: e.target.value})}/></div>
+              <div className="col-span-2">
+                <label className="input-label">Service description</label>
+                <textarea className="input" rows={2} placeholder="Online marketing services - April 2026" value={invForm.invoice_description} onChange={e => setInvForm({...invForm, invoice_description: e.target.value})}/>
+              </div>
+              <div className="col-span-2">
+                <label className="input-label">Issuer details</label>
+                <textarea className="input" rows={3} placeholder={'Company name\\nIDNO / VAT\\nIBAN\\nAddress\\nEmail'} value={invForm.issuer_details} onChange={e => setInvForm({...invForm, issuer_details: e.target.value})}/>
+              </div>
+              <div className="col-span-2">
+                <label className="input-label">Client billing details</label>
+                <textarea className="input" rows={3} placeholder={'Client company\\nVAT / ID\\nAddress\\nCountry'} value={invForm.client_billing_details} onChange={e => setInvForm({...invForm, client_billing_details: e.target.value})}/>
+              </div>
+              <div className="col-span-2"><label className="input-label">Notes</label><textarea className="input" rows={2} value={invForm.notes} onChange={e => setInvForm({...invForm, notes: e.target.value})}/></div>
             </div>
             <div className="flex gap-3 pt-2">
               {selectedInv && <button className="btn-danger flex items-center gap-1" onClick={() => delInvoice(selectedInv.id)}><Trash2 className="w-4 h-4"/></button>}
+              {selectedInv && <a href={`/invoice/${selectedInv.id}`} target="_blank" rel="noreferrer" className="btn-secondary flex items-center gap-2"><Download className="w-4 h-4"/> PDF</a>}
               <button className="btn-secondary flex-1" onClick={() => setInvModal(false)}>Cancel</button>
               <button className="btn-primary flex-1" onClick={saveInvoice} disabled={loading||!invForm.amount||!invForm.client_id}>{loading ? 'Saving...' : 'Save'}</button>
             </div>

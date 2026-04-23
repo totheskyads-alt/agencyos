@@ -91,14 +91,26 @@ export default function BugsPage() {
   async function deleteIdea(id) { await supabase.from('ideas').delete().eq('id', id); load(); }
   async function resolveIdea(id) { await supabase.from('ideas').update({ status: 'done' }).eq('id', id); load(); }
 
-  function downloadForClaude() {
+  function downloadMarkdown(filename, markdown) {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([markdown], { type: 'text/markdown' }));
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }
+
+  function downloadBugs() {
     const openBugs = bugs.filter(b => b.status !== 'resolved');
     if (openBugs.length === 0) { alert('No open bugs to export.'); return; }
-    const md = `# Sky Metrics — Bug Report\nGenerated: ${new Date().toLocaleString()}\n\n---\n\n${openBugs.map((b, i) => `## Bug #${b.bug_number || i+1}: ${b.title}\n\n**Category:** ${b.environment || 'General'}\n**Priority:** ${b.priority}\n\n**Description:**\n${b.description || '—'}\n\n**Steps to Reproduce:**\n${b.steps_to_reproduce || '—'}\n\n**Expected:** ${b.expected_behavior || '—'}\n\n**Actual:** ${b.actual_behavior || '—'}\n\n---`).join('\n\n')}\n\n## Instructions for Claude:\nPlease analyze the bugs above and provide fixed files.\nRepository: agencyos/app/dashboard/ + agencyos/components/ + agencyos/lib/\n`;
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(new Blob([md], { type: 'text/markdown' }));
-    a.download = `skymetrics-bugs-${new Date().toISOString().slice(0,10)}.md`;
-    a.click();
+    const md = `# Sky Metrics — Bug Report\nGenerated: ${new Date().toLocaleString()}\n\n---\n\n${openBugs.map((b, i) => `## Bug #${b.bug_number || i+1}: ${b.title}\n\n**Category:** ${b.environment || 'General'}\n**Priority:** ${b.priority}\n\n**Description:**\n${b.description || '—'}\n\n**Steps to Reproduce:**\n${b.steps_to_reproduce || '—'}\n\n**Expected:** ${b.expected_behavior || '—'}\n\n**Actual:** ${b.actual_behavior || '—'}\n\n---`).join('\n\n')}\n`;
+    downloadMarkdown(`skymetrics-bugs-${new Date().toISOString().slice(0,10)}.md`, md);
+  }
+
+  function downloadIdeas() {
+    const exportIdeas = ideas.filter(i => i.status !== 'done');
+    if (exportIdeas.length === 0) { alert('No open ideas to export.'); return; }
+    const md = `# Sky Metrics — Ideas\nGenerated: ${new Date().toLocaleString()}\n\n---\n\n${exportIdeas.map((idea, i) => `## Idea #${i+1}: ${idea.title}\n\n**Priority:** ${idea.priority || 'medium'}\n**Status:** ${idea.status || 'open'}\n\n**Description:**\n${idea.description || '—'}\n\n---`).join('\n\n')}\n`;
+    downloadMarkdown(`skymetrics-ideas-${new Date().toISOString().slice(0,10)}.md`, md);
   }
 
   const openBugs = bugs.filter(b => b.status !== 'resolved');
@@ -122,8 +134,13 @@ export default function BugsPage() {
           </button>
         </div>
         {tab === 'bugs' && openBugs.length > 0 && (
-          <button onClick={downloadForClaude} className="btn-secondary flex items-center gap-2 text-footnote">
-            <Download className="w-3.5 h-3.5" /> Download for Claude
+          <button onClick={downloadBugs} className="btn-secondary flex items-center gap-2 text-footnote">
+            <Download className="w-3.5 h-3.5" /> Download Bugs
+          </button>
+        )}
+        {tab === 'ideas' && openIdeas.length > 0 && (
+          <button onClick={downloadIdeas} className="btn-secondary flex items-center gap-2 text-footnote">
+            <Download className="w-3.5 h-3.5" /> Download Ideas
           </button>
         )}
       </div>

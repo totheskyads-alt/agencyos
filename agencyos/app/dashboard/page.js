@@ -82,7 +82,7 @@ export default function DashboardPage() {
       supabase.from('time_entries').select('duration_seconds').eq('user_id',user.id).not('end_time','is',null).gte('created_at',monthStart),
       supabase.from('clients').select('id'),
       supabase.from('projects').select('id').eq('status','active'),
-      supabase.from('tasks').select('id,assigned_to').or('is_archived.eq.false,is_archived.is.null'),
+      supabase.from('tasks').select('id,assigned_to,project_id').or('is_archived.eq.false,is_archived.is.null').not('project_id','is',null),
       supabase.from('time_entries').select('duration_seconds,description,projects(name,color,clients(name))').eq('user_id',user.id).not('end_time','is',null).order('created_at',{ascending:false}).limit(5),
     ]);
 

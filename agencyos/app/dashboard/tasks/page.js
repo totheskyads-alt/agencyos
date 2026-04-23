@@ -28,6 +28,7 @@ const PRIORITY = {
 };
 const COL_COLORS = ['#007AFF','#34C759','#FF9500','#FF3B30','#AF52DE','#32ADE6','#5856D6','#FF2D55','#AEAEB2'];
 const VIEW_KEY = 'agencyos_tasks_view';
+const ARCHIVED_PAGE_SIZE = 10;
 
 
 // ─── Download File Helper ─────────────────────────────────────────────────────
@@ -686,6 +687,9 @@ export default function TasksPage() {
   const [filterPriority, setFilterPriority] = useState('');
   const [search, setSearch] = useState('');
   const [collapsed, setCollapsed] = useState({});
+  const [expandedArchived, setExpandedArchived] = useState({});
+  const [archivedVisibleCounts, setArchivedVisibleCounts] = useState({});
+  const [archivePageCount, setArchivePageCount] = useState(ARCHIVED_PAGE_SIZE);
   const [dragOver, setDragOver] = useState(null);
   const [dragCol, setDragCol] = useState(null);
   const [dragOverCol, setDragOverCol] = useState(null);
@@ -820,8 +824,10 @@ export default function TasksPage() {
     const srcTask = tasks.find(t => t.id === srcId);
     if (!srcTask || !targetColId) return;
 
+    const knownColIds = new Set(boardColumns.map(c => c.id));
+    const isFirstCol = boardColumns[0]?.id === targetColId;
     const targetItems = boardTasks
-      .filter(t => t.id !== srcId && t.column_id === targetColId)
+      .filter(t => t.id !== srcId && (t.column_id === targetColId || (isFirstCol && (!t.column_id || !knownColIds.has(t.column_id)))))
       .sort((a, b) => (a.position ?? 9999) - (b.position ?? 9999));
     const foundIndex = beforeTaskId ? targetItems.findIndex(t => t.id === beforeTaskId) : -1;
     const insertAt = beforeTaskId && foundIndex >= 0 ? foundIndex : targetItems.length;
@@ -940,7 +946,7 @@ export default function TasksPage() {
   return (
     <div className="space-y-4">
       {/* Header */}
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+      <div className={`flex flex-col gap-3 lg:items-center ${mode === 'board' ? 'lg:items-start' : 'lg:flex-row lg:justify-between'}`}>
         <div>
           <h1 className="text-title2 font-bold text-ios-primary">{mode==='archive' ? 'Archive' : 'Tasks'}</h1>
           <p className="text-subhead text-ios-secondary">{mode==='archive' ? `${archivedTasks.length} archived` : hasFilters ? `${visible.length} of ${tasks.length}` : `${tasks.length} tasks`}</p>
@@ -1072,6 +1078,9 @@ export default function TasksPage() {
             const openTasks = projTasks.filter(t => t.status!=='done');
             const doneTasks = projTasks.filter(t => t.status==='done');
             const archivedForProject = visibleArchived.filter(t => t.project_id === pid);
+            const archivedOpen = expandedArchived[pid] === true;
+            const archivedCount = archivedVisibleCounts[pid] || ARCHIVED_PAGE_SIZE;
+            const shownArchived = archivedForProject.slice(0, archivedCount);
             const isCollapsed = collapsed[pid];
             return (
               <div key={pid}>
@@ -1121,25 +1130,35 @@ export default function TasksPage() {
                 )}
                 {!isCollapsed && archivedForProject.length > 0 && (
                   <div className="border-t border-ios-separator/20 bg-orange-50/30">
-                    <button onClick={() => setCollapsed(p => ({ ...p, [`arch_${pid}`]: !p[`arch_${pid}`] }))}
+                    <button onClick={() => setExpandedArchived(p => ({ ...p, [pid]: !archivedOpen }))}
                       className="flex items-center gap-2 w-full px-4 py-2 text-footnote text-ios-orange hover:bg-orange-50">
-                      <ChevronDown className={`w-3.5 h-3.5 transition-transform ${collapsed[`arch_${pid}`] ? '-rotate-90' : ''}`}/>
-                      {collapsed[`arch_${pid}`] ? `Show ${archivedForProject.length} archived tasks` : `Hide ${archivedForProject.length} archived tasks`}
+                      <ChevronDown className={`w-3.5 h-3.5 transition-transform ${!archivedOpen ? '-rotate-90' : ''}`}/>
+                      {archivedOpen ? `Hide ${archivedForProject.length} archived tasks` : `Show ${archivedForProject.length} archived tasks`}
                     </button>
-                    {!collapsed[`arch_${pid}`] && archivedForProject.map(t => (
-                      <div key={t.id} onClick={() => setTaskModal(t)}
-                        className="flex items-center gap-3 px-4 py-3 border-t border-ios-separator/20 hover:bg-orange-50/60 cursor-pointer opacity-80">
-                        <Archive className="w-4 h-4 text-ios-orange shrink-0"/>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-subhead text-ios-secondary line-through truncate">{t.title}</p>
-                          <p className="text-caption1 text-ios-tertiary">Archived {fmtDate(t.archived_at)}</p>
-                        </div>
-                        <button onClick={e => { e.stopPropagation(); restoreTask(t.id); }}
-                          className="px-2.5 py-1.5 rounded-ios bg-white text-caption1 font-semibold text-ios-blue hover:bg-blue-50">
-                          Restore
-                        </button>
-                      </div>
-                    ))}
+                    {archivedOpen && (
+                      <>
+                        {shownArchived.map(t => (
+                          <div key={t.id} onClick={() => setTaskModal(t)}
+                            className="flex items-center gap-3 px-4 py-3 border-t border-ios-separator/20 hover:bg-orange-50/60 cursor-pointer opacity-80">
+                            <Archive className="w-4 h-4 text-ios-orange shrink-0"/>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-subhead text-ios-secondary line-through truncate">{t.title}</p>
+                              <p className="text-caption1 text-ios-tertiary">Archived {fmtDate(t.archived_at)}</p>
+                            </div>
+                            <button onClick={e => { e.stopPropagation(); restoreTask(t.id); }}
+                              className="px-2.5 py-1.5 rounded-ios bg-white text-caption1 font-semibold text-ios-blue hover:bg-blue-50">
+                              Restore
+                            </button>
+                          </div>
+                        ))}
+                        {archivedCount < archivedForProject.length && (
+                          <button onClick={() => setArchivedVisibleCounts(p => ({ ...p, [pid]: archivedCount + ARCHIVED_PAGE_SIZE }))}
+                            className="w-full px-4 py-2.5 border-t border-ios-separator/20 text-footnote font-semibold text-ios-orange hover:bg-orange-50">
+                            Show 10 more archived tasks
+                          </button>
+                        )}
+                      </>
+                    )}
                   </div>
                 )}
               </div>
@@ -1187,7 +1206,14 @@ export default function TasksPage() {
                           e.preventDefault(); e.stopPropagation();
                           const srcId = e.dataTransfer.getData('taskId');
                           if (!srcId || srcId === task.id) { setDragOverTaskId(null); return; }
-                          await moveTaskToPosition(srcId, col.id, task.id);
+                          const rect = e.currentTarget.getBoundingClientRect();
+                          const dropAfter = e.clientY > rect.top + rect.height / 2;
+                          const ordered = colTasks
+                            .filter(t => t.id !== srcId)
+                            .sort((a, b) => (a.position ?? 9999) - (b.position ?? 9999));
+                          const targetIndex = ordered.findIndex(t => t.id === task.id);
+                          const beforeTaskId = dropAfter ? ordered[targetIndex + 1]?.id || null : task.id;
+                          await moveTaskToPosition(srcId, col.id, beforeTaskId);
                           setDragOver(null); setDragOverTaskId(null); setDragTaskId(null);
                         }}
                         onClick={() => setTaskModal(task)}
@@ -1304,7 +1330,9 @@ export default function TasksPage() {
         <div className="card overflow-hidden">
           {archivedTasks.length === 0 ? (
             <div className="p-12 text-center"><Archive className="w-8 h-8 text-ios-label4 mx-auto mb-3"/><p className="text-subhead text-ios-secondary">No archived tasks</p></div>
-          ) : archivedTasks.map(task => {
+          ) : (
+            <>
+              {archivedTasks.slice(0, archivePageCount).map(task => {
             const assignee = members.find(m => m.id===task.assigned_to);
             return (
               <div key={task.id} onClick={() => setTaskModal(task)}
@@ -1321,7 +1349,15 @@ export default function TasksPage() {
                 ))}
               </div>
             );
-          })}
+              })}
+              {archivePageCount < archivedTasks.length && (
+                <button onClick={() => setArchivePageCount(c => c + ARCHIVED_PAGE_SIZE)}
+                  className="w-full px-4 py-3 text-footnote font-semibold text-ios-blue hover:bg-blue-50 border-t border-ios-separator/20">
+                  Show 10 more archived tasks
+                </button>
+              )}
+            </>
+          )}
         </div>
       )}
 
