@@ -35,7 +35,11 @@ export default function TimerPage() {
   const [startingTimer, setStartingTimer] = useState(false);
 
   useEffect(() => {
-    supabase.auth.getUser().then(({ data: { user } }) => { setUser(user); loadData(user); });
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      const user = session?.user;
+      setUser(user || null);
+      loadData(user);
+    });
   }, []);
 
   useEffect(() => { if (user) loadData(user); }, [activeTimer]);
@@ -227,9 +231,9 @@ export default function TimerPage() {
             </div>
             {dayEntries.map(e => {
               const isEditing = editingEntry === e.id;
-              const displayEndTime = e.start_time && e.duration_seconds
+              const displayEndTime = e.end_time || (e.start_time && e.duration_seconds
                 ? new Date(parseUTC(e.start_time).getTime() + (e.duration_seconds || 0) * 1000).toISOString()
-                : e.end_time;
+                : null);
               return (
                 <div key={e.id} className="border-b border-ios-separator/20 last:border-0">
                   {isEditing ? (

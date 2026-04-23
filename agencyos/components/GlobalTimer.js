@@ -4,7 +4,19 @@ import { useTimer } from '@/lib/timerContext';
 import { supabase } from '@/lib/supabase';
 import { getProjectAccess } from '@/lib/projectAccess';
 import { fmtClock, fmtDuration, parseUTC } from '@/lib/utils';
-import { Play, Square, Pause, X, Check, ChevronUp, ChevronDown } from 'lucide-react';
+import { Play, Square, Pause, X, Check, GripHorizontal } from 'lucide-react';
+
+const TIMER_POSITION_KEY = 'sm_timer_position_v1';
+
+function clampPosition(position, element) {
+  if (!position || !element || typeof window === 'undefined') return position;
+  const margin = 16;
+  const rect = element.getBoundingClientRect();
+  return {
+    x: Math.min(Math.max(position.x, margin), Math.max(margin, window.innerWidth - rect.width - margin)),
+    y: Math.min(Math.max(position.y, margin), Math.max(margin, window.innerHeight - rect.height - margin)),
+  };
+}
 
 export default function GlobalTimer() {
   const { activeTimer, elapsed, stoppedEntry, isPaused, startTimer, stopTimer, pauseTimer, dismissOverview } = useTimer();
@@ -17,6 +29,53 @@ export default function GlobalTimer() {
   const [editDuration, setEditDuration] = useState('');
   const [editDesc, setEditDesc] = useState('');
   const [projectsLoaded, setProjectsLoaded] = useState(false);
+  const [floatingPosition, setFloatingPosition] = useState(null);
+  const floatingRef = useRef(null);
+  const dragRef = useRef({ active: false, offsetX: 0, offsetY: 0 });
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const saved = localStorage.getItem(TIMER_POSITION_KEY);
+      if (saved) setFloatingPosition(JSON.parse(saved));
+    } catch {}
+  }, []);
+
+  useEffect(() => {
+    if (!floatingPosition || typeof window === 'undefined') return;
+    try { localStorage.setItem(TIMER_POSITION_KEY, JSON.stringify(floatingPosition)); } catch {}
+  }, [floatingPosition]);
+
+  useEffect(() => {
+    function handlePointerMove(event) {
+      if (!dragRef.current.active || !floatingRef.current) return;
+      const next = clampPosition({
+        x: event.clientX - dragRef.current.offsetX,
+        y: event.clientY - dragRef.current.offsetY,
+      }, floatingRef.current);
+      setFloatingPosition(next);
+    }
+
+    function handlePointerUp() {
+      dragRef.current.active = false;
+    }
+
+    window.addEventListener('pointermove', handlePointerMove);
+    window.addEventListener('pointerup', handlePointerUp);
+    return () => {
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', handlePointerUp);
+    };
+  }, []);
+
+  useEffect(() => {
+    function handleResize() {
+      if (!floatingPosition || !floatingRef.current) return;
+      setFloatingPosition(prev => clampPosition(prev, floatingRef.current));
+    }
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, [floatingPosition]);
 
   useEffect(() => {
     if (stoppedEntry) {
@@ -73,6 +132,28 @@ export default function GlobalTimer() {
     }
     dismissOverview();
   }
+
+  function beginDrag(event) {
+    if (!floatingRef.current) return;
+    const target = event.target;
+    if (target instanceof HTMLElement) {
+      const isHandle = target.closest('[data-timer-drag-handle="true"]');
+      if (!isHandle && target.closest('button')) return;
+    }
+    const rect = floatingRef.current.getBoundingClientRect();
+    dragRef.current = {
+      active: true,
+      offsetX: event.clientX - rect.left,
+      offsetY: event.clientY - rect.top,
+    };
+    if (!floatingPosition) {
+      setFloatingPosition({ x: rect.left, y: rect.top });
+    }
+  }
+
+  const floatingStyle = floatingPosition
+    ? { left: `${floatingPosition.x}px`, top: `${floatingPosition.y}px`, right: 'auto', bottom: 'auto', transform: 'none' }
+    : undefined;
 
   // ── Stop overview — centered modal ────────────────────────────────────────
   if (stoppedEntry) {
@@ -132,8 +213,17 @@ export default function GlobalTimer() {
   // ── Active timer — floating pill ──────────────────────────────────────────
   if (activeTimer) {
     return (
-      <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 lg:left-auto lg:translate-x-0 lg:right-6">
+      <div ref={floatingRef} style={floatingStyle} className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 lg:left-auto lg:translate-x-0 lg:right-6">
         <div className={`flex items-center gap-3 text-white px-4 py-3 rounded-2xl shadow-2xl transition-colors ${isPaused ? 'bg-ios-orange' : 'bg-ios-blue'}`}>
+          <button
+            type="button"
+            onPointerDown={beginDrag}
+            data-timer-drag-handle="true"
+            className="shrink-0 p-1.5 rounded-xl bg-white/15 hover:bg-white/20 cursor-grab active:cursor-grabbing"
+            title="Move timer"
+          >
+            <GripHorizontal className="w-4 h-4" />
+          </button>
           <div className={`w-2 h-2 bg-white rounded-full shrink-0 ${isPaused ? '' : 'animate-pulse'}`} />
           <div className="min-w-0 max-w-[140px]">
             <p className="text-caption1 font-medium opacity-80 truncate">{activeTimer.projects?.name}</p>
@@ -217,10 +307,19 @@ export default function GlobalTimer() {
 
   // ── Idle — floating button ────────────────────────────────────────────────
   return (
-    <div className="fixed bottom-6 right-6 z-50">
+    <div ref={floatingRef} style={floatingStyle} className="fixed bottom-6 right-6 z-50">
       <button onClick={() => { loadProjects(); setShowStart(true); }}
         className="flex items-center gap-2.5 bg-ios-blue text-white px-5 py-3 rounded-2xl shadow-2xl hover:opacity-95 active:scale-95 transition-all font-semibold text-subhead">
         <Play className="w-4 h-4" fill="white" /> Start Timer
+      </button>
+      <button
+        type="button"
+        onPointerDown={beginDrag}
+        data-timer-drag-handle="true"
+        className="absolute -top-2 -left-2 w-7 h-7 rounded-full bg-white text-ios-secondary shadow-ios flex items-center justify-center cursor-grab active:cursor-grabbing"
+        title="Move timer button"
+      >
+        <GripHorizontal className="w-3.5 h-3.5" />
       </button>
     </div>
   );

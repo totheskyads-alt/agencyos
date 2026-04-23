@@ -1,5 +1,5 @@
 'use client';
-import { useState, useEffect, useRef } from 'react';
+import { useMemo, useState, useEffect, useRef } from 'react';
 import { flushSync } from 'react-dom';
 import { supabase } from '@/lib/supabase';
 import Modal from '@/components/Modal';
@@ -116,7 +116,7 @@ function LabelPill({ label, onRemove }) {
 }
 
 // ─── Task Detail Modal ────────────────────────────────────────────────────────
-function TaskDetail({ task, members, boardColumns, projects, labels: allLabels, activeTimer, elapsed, isPaused, initialTab, onClose, onSave, onDelete, onStartTimer, onStopTimer, onPauseTimer, onProjectCreated, currentUser }) {
+function TaskDetail({ task, members, boardColumns, projects, labels: allLabels, activeTimer, elapsed, isPaused, initialTab, onClose, onSave, onDelete, onStartTimer, onStopTimer, onPauseTimer, onProjectCreated, onLabelsChange, currentUser }) {
   const isNew = !task?.id;
   const isTimerActive = activeTimer?.task_id === task?.id;
 
@@ -210,7 +210,16 @@ function TaskDetail({ task, members, boardColumns, projects, labels: allLabels, 
       await supabase.from('task_labels').insert({ task_id: task.id, label_id: data.id });
       setTaskLabels(p => [...p, data]);
     }
+    if (data) onLabelsChange?.(prev => [...prev, data].sort((a, b) => a.name.localeCompare(b.name)));
     setNewLabelName(''); setShowNewLabel(false); onSave();
+  }
+
+  async function deleteLabelEverywhere(labelId) {
+    await supabase.from('task_labels').delete().eq('label_id', labelId);
+    await supabase.from('labels').delete().eq('id', labelId);
+    setTaskLabels(prev => prev.filter(label => label.id !== labelId));
+    setPendingLabels(prev => prev.filter(label => label.id !== labelId));
+    onLabelsChange?.(prev => prev.filter(label => label.id !== labelId));
   }
 
   async function save() {
@@ -511,19 +520,28 @@ function TaskDetail({ task, members, boardColumns, projects, labels: allLabels, 
                     <input className="input py-1.5 text-footnote" placeholder="Search..." value={labelSearch} onChange={e => setLabelSearch(e.target.value)} autoFocus />
                   </div>
                   {filteredLabels.map(l => (
-                    <button key={l.id} onClick={() => {
-                      if (isNew) {
-                        setPendingLabels(p => p.some(x=>x.id===l.id) ? p.filter(x=>x.id!==l.id) : [...p, l]);
-                      } else {
-                        toggleLabel(l);
-                      }
-                    }} className="flex items-center justify-between w-full px-3 py-2.5 hover:bg-ios-fill">
-                      <span className="flex items-center gap-2">
-                        <span className="w-3 h-3 rounded-full" style={{ background: l.color }} />
-                        <span className="text-subhead">{l.name}</span>
-                      </span>
-                      {(isNew ? pendingLabels : taskLabels).some(tl => tl.id===l.id) && <Check className="w-4 h-4 text-ios-blue" />}
-                    </button>
+                    <div key={l.id} className="flex items-center gap-1 pr-1 hover:bg-ios-fill">
+                      <button onClick={() => {
+                        if (isNew) {
+                          setPendingLabels(p => p.some(x=>x.id===l.id) ? p.filter(x=>x.id!==l.id) : [...p, l]);
+                        } else {
+                          toggleLabel(l);
+                        }
+                      }} className="flex items-center justify-between flex-1 px-3 py-2.5 text-left">
+                        <span className="flex items-center gap-2">
+                          <span className="w-3 h-3 rounded-full" style={{ background: l.color }} />
+                          <span className="text-subhead">{l.name}</span>
+                        </span>
+                        {(isNew ? pendingLabels : taskLabels).some(tl => tl.id===l.id) && <Check className="w-4 h-4 text-ios-blue" />}
+                      </button>
+                      <button
+                        onClick={e => { e.stopPropagation(); deleteLabelEverywhere(l.id); }}
+                        className="p-1.5 rounded-ios text-ios-tertiary hover:text-ios-red hover:bg-red-50 shrink-0"
+                        title="Delete label"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
                   ))}
                   <div className="border-t border-ios-separator/30 p-2">
                     {showNewLabel ? (
@@ -783,6 +801,7 @@ export default function TasksPage() {
   const [mode, setMode] = useState(() => {
     try { return localStorage.getItem(VIEW_KEY) || 'list'; } catch { return 'list'; }
   });
+  const modeRef = useRef(mode);
   const updateMode = m => { setMode(m); try { localStorage.setItem(VIEW_KEY, m); } catch {} };
 
   const [projects, setProjects] = useState([]);
@@ -819,6 +838,9 @@ export default function TasksPage() {
   const [dragOverTaskId, setDragOverTaskId] = useState(null);
   const [dragOverPosition, setDragOverPosition] = useState('after');
   const [dragTopColId, setDragTopColId] = useState(null);
+  const dragPointerRef = useRef({ x: 0, y: 0 });
+  const autoScrollColumnIdRef = useRef(null);
+  const boardColumnRefs = useRef({});
   const [taskModal, setTaskModal] = useState(null);
   const [newColModal, setNewColModal] = useState(false);
   const [newColName, setNewColName] = useState('');
@@ -832,20 +854,65 @@ export default function TasksPage() {
   const { isManager, role, profile: userProfile } = useRole();
 
   useEffect(() => {
+    modeRef.current = mode;
+  }, [mode]);
+
+  useEffect(() => {
     if (urlMode === 'list' || urlMode === 'board' || urlMode === 'archive') updateMode(urlMode);
     if (urlProjectId) setFilterProject(urlProjectId);
-    supabase.auth.getUser().then(({ data: { user } }) => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      const user = session?.user;
       setCurrentUser(user);
       currentUserRef2.current = user;
       loadTimer();
     });
     loadAll();
-    // Poll every 15s — reload tasks only (columns don't change)
-    const interval = setInterval(() => loadTasks(), 15000);
+    const interval = setInterval(() => loadTasks(), 45000);
     const onStorage = (e) => { if (e.key === 'sm_tasks_updated') loadTasks(); };
     window.addEventListener('storage', onStorage);
     return () => { clearInterval(interval); window.removeEventListener('storage', onStorage); };
   }, []);
+
+  useEffect(() => {
+    if (!tasksLoaded) return;
+    loadTasks();
+  }, [mode]);
+
+  useEffect(() => {
+    if (!dragTaskId) return;
+
+    const onPointerMove = (event) => {
+      dragPointerRef.current = { x: event.clientX, y: event.clientY };
+    };
+
+    const interval = setInterval(() => {
+      const { y } = dragPointerRef.current;
+      if (!y) return;
+
+      const viewportMargin = 90;
+      const viewportStep = 18;
+      if (y > window.innerHeight - viewportMargin) window.scrollBy({ top: viewportStep, behavior: 'auto' });
+      if (y < viewportMargin) window.scrollBy({ top: -viewportStep, behavior: 'auto' });
+
+      const activeColumnId = autoScrollColumnIdRef.current;
+      const scrollEl = activeColumnId ? boardColumnRefs.current[activeColumnId] : null;
+      if (!scrollEl) return;
+      const rect = scrollEl.getBoundingClientRect();
+      const columnMargin = 70;
+      const columnStep = 14;
+      if (y > rect.bottom - columnMargin) scrollEl.scrollTop += columnStep;
+      else if (y < rect.top + columnMargin) scrollEl.scrollTop -= columnStep;
+    }, 32);
+
+    window.addEventListener('dragover', onPointerMove);
+    window.addEventListener('pointermove', onPointerMove);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('dragover', onPointerMove);
+      window.removeEventListener('pointermove', onPointerMove);
+      autoScrollColumnIdRef.current = null;
+    };
+  }, [dragTaskId]);
 
   useEffect(() => {
     const h = e => { if (memberRef.current && !memberRef.current.contains(e.target)) setShowMemberDrop(false); };
@@ -865,7 +932,7 @@ export default function TasksPage() {
   }, [tasksLoaded, urlTaskId, urlMode, tasks, archivedTasks]);
 
   async function loadAll(targetUserId) {
-    const accessInfo = await getProjectAccess();
+    const accessInfo = await getProjectAccess({ forceRefresh: true });
     setAccess(accessInfo);
     const myUid = accessInfo.user?.id;
     const targetUid = targetUserId || myUid;
@@ -881,14 +948,14 @@ export default function TasksPage() {
 
     const [{ data: proj }, { data: mem }, { data: lbl }] = await Promise.all([
       accessInfo.isRestricted && accessInfo.projectIds.length === 0 ? Promise.resolve({ data: [] }) : projectQuery,
-      supabase.from('profiles').select('id,full_name,email,role,avatar_url').order('full_name'),
+      supabase.from('profiles').select('id,full_name,email,role,avatar_url').or('is_deleted.is.null,is_deleted.eq.false').order('full_name'),
       supabase.from('labels').select('*').order('name'),
     ]);
     setProjects(proj||[]); setMembers(mem||[]); setLabels(lbl||[]);
     setAllMembers(mem||[]);
 
     await loadColumnsForUser(targetUid, myUid);
-    await loadTasks();
+    await loadTasks(accessInfo, mem || []);
   }
 
   async function loadColumnsForUser(targetUid, myUid) {
@@ -909,11 +976,12 @@ export default function TasksPage() {
     setBoardColumns(finalCols);
   }
 
-  async function loadTasks() {
-    const accessInfo = await getProjectAccess();
+  async function loadTasks(cachedAccess = null, cachedMembers = null) {
+    const accessInfo = cachedAccess || access || await getProjectAccess();
     setAccess(accessInfo);
     const currentUid = accessInfo.user?.id;
     const myRole = accessInfo.role || 'operator';
+    const memberList = cachedMembers || allMembers;
 
     if (accessInfo.isRestricted && accessInfo.projectIds.length === 0) {
       setTasks([]);
@@ -925,37 +993,42 @@ export default function TasksPage() {
 
     // Get role hierarchy for filtering
     let activeQ = supabase.from('tasks').select('*, profiles!tasks_assigned_to_fkey(id,full_name,email,role,avatar_url), projects(id,name,color,client_id,clients(id,name))').or('is_archived.eq.false,is_archived.is.null').order('position');
-    let archivedQ = supabase.from('tasks').select('*, profiles!tasks_assigned_to_fkey(id,full_name,email,role,avatar_url), projects(id,name,color,client_id,clients(id,name))').eq('is_archived',true).order('archived_at',{ascending:false}).limit(100);
+    const shouldLoadArchived = modeRef.current !== 'board';
+    let archivedQ = shouldLoadArchived
+      ? supabase.from('tasks').select('*, profiles!tasks_assigned_to_fkey(id,full_name,email,role,avatar_url), projects(id,name,color,client_id,clients(id,name))').eq('is_archived',true).order('archived_at',{ascending:false}).limit(60)
+      : null;
 
     if (accessInfo.isRestricted) {
       activeQ = activeQ.in('project_id', accessInfo.projectIds);
-      archivedQ = archivedQ.in('project_id', accessInfo.projectIds);
+      if (archivedQ) archivedQ = archivedQ.in('project_id', accessInfo.projectIds);
     }
 
     // Operator: only own tasks
     if (myRole === 'operator') {
       activeQ = activeQ.eq('assigned_to', currentUid);
-      archivedQ = archivedQ.eq('assigned_to', currentUid);
+      if (archivedQ) archivedQ = archivedQ.eq('assigned_to', currentUid);
     }
 
-    const [{ data: activeRaw }, { data: archivedRaw }] = await Promise.all([activeQ, archivedQ]);
+    const [{ data: activeRaw }, archivedResult] = await Promise.all([
+      activeQ,
+      archivedQ || Promise.resolve({ data: [] }),
+    ]);
+    const archivedRaw = archivedResult?.data;
 
     // Manager: filter out tasks assigned to admins
     let active = activeRaw || [];
     let archived = archivedRaw || [];
     if (myRole === 'manager') {
-      const { data: adminIds } = await supabase.from('profiles').select('id').eq('role','admin');
-      const adminSet = new Set((adminIds||[]).map(a => a.id));
+      const adminSet = new Set((memberList || []).filter(member => member.role === 'admin').map(member => member.id));
       active = active.filter(t => !adminSet.has(t.assigned_to));
       archived = archived.filter(t => !adminSet.has(t.assigned_to));
     }
-    const all = [...(active||[]), ...(archived||[])];
-    const ids = all.map(t => t.id);
+    const activeIds = (active || []).map(t => t.id);
     let cc = {}, tl = {};
-    if (ids.length > 0) {
+    if (activeIds.length > 0) {
       const [{ data: comments }, { data: tlData }] = await Promise.all([
-        supabase.from('task_comments').select('task_id').in('task_id', ids),
-        supabase.from('task_labels').select('task_id, labels(*)').in('task_id', ids),
+        supabase.from('task_comments').select('task_id').in('task_id', activeIds),
+        supabase.from('task_labels').select('task_id, labels(*)').in('task_id', activeIds),
       ]);
       (comments||[]).forEach(c => cc[c.task_id] = (cc[c.task_id]||0)+1);
       (tlData||[]).forEach(row => { if (!tl[row.task_id]) tl[row.task_id]=[]; if (row.labels) tl[row.task_id].push(row.labels); });
@@ -1074,46 +1147,68 @@ export default function TasksPage() {
   async function handleStartTimer(task) { await startTimer({ projectId: task.project_id, taskId: task.id, description: task.title }); }
 
   // Filters
-  let visible = tasks;
-  if (urlClientId) visible = visible.filter(t => t.projects?.client_id === urlClientId);
-  if (mainFilter !== 'all') visible = visible.filter(t => t.assigned_to===mainFilter);
-  if (filterProject) visible = visible.filter(t => t.project_id===filterProject);
-  if (filterPriority) visible = visible.filter(t => t.priority===filterPriority);
-  if (filterLabel) visible = visible.filter(t => (taskLabels[t.id]||[]).some(l => l.id===filterLabel));
-  if (search) visible = visible.filter(t => t.title?.toLowerCase().includes(search.toLowerCase()));
-
-  const byProject = {};
-  visible.forEach(t => {
-    if (!byProject[t.project_id]) byProject[t.project_id] = { project: t.projects, tasks: [] };
-    byProject[t.project_id].tasks.push(t);
-  });
-
-  const selectedMember = members.find(m => m.id===mainFilter);
-  // Board: show tasks assigned to the board owner
-  const boardOwner = viewingUserId || currentUser?.id;
-  let boardTasks = boardOwner ? tasks.filter(t => t.assigned_to === boardOwner) : tasks;
-  if (urlClientId) boardTasks = boardTasks.filter(t => t.projects?.client_id === urlClientId);
-  if (filterProject) boardTasks = boardTasks.filter(t => t.project_id===filterProject);
-  if (filterPriority) boardTasks = boardTasks.filter(t => t.priority===filterPriority);
-  if (filterLabel) boardTasks = boardTasks.filter(t => (taskLabels[t.id]||[]).some(l => l.id===filterLabel));
-  if (search) boardTasks = boardTasks.filter(t => t.title?.toLowerCase().includes(search.toLowerCase()));
-  let visibleArchived = archivedTasks;
-  if (urlClientId) visibleArchived = visibleArchived.filter(t => t.projects?.client_id === urlClientId);
-  if (mainFilter !== 'all') visibleArchived = visibleArchived.filter(t => t.assigned_to===mainFilter);
-  if (filterProject) visibleArchived = visibleArchived.filter(t => t.project_id===filterProject);
-  if (filterPriority) visibleArchived = visibleArchived.filter(t => t.priority===filterPriority);
-  if (filterLabel) visibleArchived = visibleArchived.filter(t => (taskLabels[t.id]||[]).some(l => l.id===filterLabel));
-  if (search) visibleArchived = visibleArchived.filter(t => t.title?.toLowerCase().includes(search.toLowerCase()));
-  if (archiveSearch) {
-    const q = archiveSearch.toLowerCase();
-    visibleArchived = visibleArchived.filter(t =>
-      t.title?.toLowerCase().includes(q) ||
-      t.description?.toLowerCase().includes(q) ||
-      t.projects?.name?.toLowerCase().includes(q) ||
-      t.projects?.clients?.name?.toLowerCase().includes(q)
-    );
-  }
   const hasFilters = mainFilter!=='all'||filterProject||filterPriority||filterLabel||search||urlClientId;
+  const selectedMember = useMemo(() => members.find(m => m.id===mainFilter), [members, mainFilter]);
+
+  const visible = useMemo(() => {
+    let next = tasks;
+    if (urlClientId) next = next.filter(t => t.projects?.client_id === urlClientId);
+    if (mainFilter !== 'all') next = next.filter(t => t.assigned_to===mainFilter);
+    if (filterProject) next = next.filter(t => t.project_id===filterProject);
+    if (filterPriority) next = next.filter(t => t.priority===filterPriority);
+    if (filterLabel) next = next.filter(t => (taskLabels[t.id]||[]).some(l => l.id===filterLabel));
+    if (search) {
+      const query = search.toLowerCase();
+      next = next.filter(t => t.title?.toLowerCase().includes(query));
+    }
+    return next;
+  }, [tasks, urlClientId, mainFilter, filterProject, filterPriority, filterLabel, taskLabels, search]);
+
+  const byProject = useMemo(() => {
+    const grouped = {};
+    visible.forEach(t => {
+      if (!grouped[t.project_id]) grouped[t.project_id] = { project: t.projects, tasks: [] };
+      grouped[t.project_id].tasks.push(t);
+    });
+    return grouped;
+  }, [visible]);
+
+  const boardOwner = viewingUserId || currentUser?.id;
+  const boardTasks = useMemo(() => {
+    let next = boardOwner ? tasks.filter(t => t.assigned_to === boardOwner) : tasks;
+    if (urlClientId) next = next.filter(t => t.projects?.client_id === urlClientId);
+    if (filterProject) next = next.filter(t => t.project_id===filterProject);
+    if (filterPriority) next = next.filter(t => t.priority===filterPriority);
+    if (filterLabel) next = next.filter(t => (taskLabels[t.id]||[]).some(l => l.id===filterLabel));
+    if (search) {
+      const query = search.toLowerCase();
+      next = next.filter(t => t.title?.toLowerCase().includes(query));
+    }
+    return next;
+  }, [boardOwner, tasks, urlClientId, filterProject, filterPriority, filterLabel, taskLabels, search]);
+
+  const visibleArchived = useMemo(() => {
+    let next = archivedTasks;
+    if (urlClientId) next = next.filter(t => t.projects?.client_id === urlClientId);
+    if (mainFilter !== 'all') next = next.filter(t => t.assigned_to===mainFilter);
+    if (filterProject) next = next.filter(t => t.project_id===filterProject);
+    if (filterPriority) next = next.filter(t => t.priority===filterPriority);
+    if (filterLabel) next = next.filter(t => (taskLabels[t.id]||[]).some(l => l.id===filterLabel));
+    if (search) {
+      const query = search.toLowerCase();
+      next = next.filter(t => t.title?.toLowerCase().includes(query));
+    }
+    if (archiveSearch) {
+      const q = archiveSearch.toLowerCase();
+      next = next.filter(t =>
+        t.title?.toLowerCase().includes(q) ||
+        t.description?.toLowerCase().includes(q) ||
+        t.projects?.name?.toLowerCase().includes(q) ||
+        t.projects?.clients?.name?.toLowerCase().includes(q)
+      );
+    }
+    return next;
+  }, [archivedTasks, urlClientId, mainFilter, filterProject, filterPriority, filterLabel, taskLabels, search, archiveSearch]);
 
   return (
     <div className="space-y-4">
@@ -1359,6 +1454,7 @@ export default function TasksPage() {
                 className={`shrink-0 w-72 rounded-ios-lg p-3 transition-all flex flex-col min-h-0 ${isDragTarget ? 'bg-blue-50 ring-2 ring-ios-blue' : dragOverCol === col.id && dragCol !== col.id ? 'ring-2 ring-ios-orange ring-dashed' : 'bg-ios-bg'}`}
                 onDragOver={e => {
                   e.preventDefault();
+                  autoScrollColumnIdRef.current = col.id;
                   if (dragCol) {
                     if (dragOverCol !== col.id) setDragOverCol(col.id);
                   } else if (dragOver !== col.id) {
@@ -1373,12 +1469,16 @@ export default function TasksPage() {
                   onAdd={colId => setTaskModal({ column_id: colId, project_id: filterProject||'', assigned_to: viewingUserId || currentUser?.id || '' })}
                   onDragStart={() => setDragCol(col.id)}
                   onDragEnd={() => { setDragCol(null); setDragOverCol(null); }} />
-                <div className="space-y-2 flex-1 overflow-y-auto pr-1 min-h-0">
+                <div
+                  ref={el => { if (el) boardColumnRefs.current[col.id] = el; else delete boardColumnRefs.current[col.id]; }}
+                  className="space-y-2 flex-1 overflow-y-auto pr-1 min-h-0"
+                >
                   {colTasks.length > 0 && (
                     <div className={`rounded-ios border-2 border-dashed flex items-center justify-center transition-all ${dragTopColId === col.id ? 'h-10 border-ios-blue bg-blue-50 text-ios-blue' : dragTaskId ? 'h-8 border-ios-blue/30 bg-blue-50/40 text-ios-blue/70' : 'h-4 border-transparent text-transparent'}`}
                       onDragEnter={e => { e.preventDefault(); if (!dragCol && dragTopColId !== col.id) setDragTopColId(col.id); }}
                       onDragOver={e => {
                         e.preventDefault();
+                        autoScrollColumnIdRef.current = col.id;
                         if (!dragCol) {
                           if (dragTopColId !== col.id) setDragTopColId(col.id);
                           if (dragOver !== col.id) setDragOver(col.id);
@@ -1402,10 +1502,11 @@ export default function TasksPage() {
                     const isTimerActive = activeTimer?.task_id===task.id;
                     return (
                       <div key={task.id} draggable
-                        onDragStart={e => { e.dataTransfer.setData('taskId', task.id); setDragTaskId(task.id); }}
-                        onDragEnd={() => { setDragOver(null); setDragTaskId(null); setDragOverTaskId(null); setDragOverPosition('after'); setDragTopColId(null); }}
+                        onDragStart={e => { e.dataTransfer.setData('taskId', task.id); setDragTaskId(task.id); autoScrollColumnIdRef.current = col.id; }}
+                        onDragEnd={() => { setDragOver(null); setDragTaskId(null); setDragOverTaskId(null); setDragOverPosition('after'); setDragTopColId(null); autoScrollColumnIdRef.current = null; }}
                         onDragOver={e => {
                           e.preventDefault();
+                          autoScrollColumnIdRef.current = col.id;
                           const rect = e.currentTarget.getBoundingClientRect();
                           const nextPosition = e.clientY > rect.top + rect.height / 2 ? 'after' : 'before';
                           if (dragOverTaskId !== task.id) setDragOverTaskId(task.id);
@@ -1589,6 +1690,7 @@ export default function TasksPage() {
           onSave={() => { setTaskModal(null); loadTasks(); try { localStorage.setItem('sm_tasks_updated', Date.now().toString()); } catch {} }}
           onDelete={() => deleteTask(taskModal.id)}
           onProjectCreated={project => setProjects(prev => [...prev, project].sort((a,b) => a.name.localeCompare(b.name)))}
+          onLabelsChange={setLabels}
           onStartTimer={handleStartTimer} onStopTimer={stopTimer} onPauseTimer={pauseTimer} isPaused={isPaused} />
       )}
 

@@ -121,6 +121,21 @@ ALTER TABLE projects
 ALTER TABLE tasks
   ADD COLUMN IF NOT EXISTS task_type TEXT DEFAULT 'general';
 
+ALTER TABLE profiles
+  ADD COLUMN IF NOT EXISTS approval_status TEXT DEFAULT 'approved',
+  ADD COLUMN IF NOT EXISTS is_deleted BOOLEAN DEFAULT FALSE,
+  ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS reviewed_by UUID REFERENCES profiles(id) ON DELETE SET NULL;
+
+UPDATE profiles
+SET approval_status = COALESCE(approval_status, 'approved')
+WHERE approval_status IS NULL;
+
+UPDATE profiles
+SET is_deleted = COALESCE(is_deleted, FALSE)
+WHERE is_deleted IS NULL;
+
 -- Invoices: internal calculations in EUR, issuing in the selected currency
 ALTER TABLE billing
   ADD COLUMN IF NOT EXISTS project_id UUID REFERENCES projects(id) ON DELETE SET NULL,
@@ -163,12 +178,13 @@ DROP FUNCTION IF EXISTS handle_new_user();
 CREATE OR REPLACE FUNCTION handle_new_user()
 RETURNS TRIGGER AS $$
 BEGIN
-  INSERT INTO public.profiles (id, email, full_name, role)
+  INSERT INTO public.profiles (id, email, full_name, role, approval_status)
   VALUES (
     NEW.id,
     NEW.email,
     COALESCE(NEW.raw_user_meta_data->>'full_name', ''),
-    'operator'
+    'operator',
+    'pending'
   )
   ON CONFLICT (id) DO NOTHING;
   RETURN NEW;

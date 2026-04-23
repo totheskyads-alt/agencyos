@@ -3,7 +3,7 @@ import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useRole } from '@/lib/useRole';
 import { fmtDuration } from '@/lib/utils';
-import { Crown, Shield, User, Info, Trash2, AlertCircle } from 'lucide-react';
+import { Crown, Shield, User, Info, Trash2, AlertCircle, Check, X } from 'lucide-react';
 
 const ROLES = {
   admin: {
@@ -32,17 +32,24 @@ export default function TeamPage() {
   const [currentUserId, setCurrentUserId] = useState(null);
   const [showPermissions, setShowPermissions] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(null);
+  const [deleteError, setDeleteError] = useState('');
+  const [deletingId, setDeletingId] = useState(null);
   const { isAdmin } = useRole();
 
   useEffect(() => {
-    supabase.auth.getUser().then(({ data: { user } }) => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      const user = session?.user;
       setCurrentUserId(user?.id);
       load();
     });
   }, []);
 
   async function load() {
-    const { data: profiles } = await supabase.from('profiles').select('*').order('full_name');
+    const { data: profiles } = await supabase
+      .from('profiles')
+      .select('*')
+      .or('is_deleted.is.null,is_deleted.eq.false')
+      .order('full_name');
     setMembers(profiles || []);
 
     const weekStart = new Date(Date.now() - 7 * 86400000).toISOString();
@@ -62,16 +69,47 @@ export default function TeamPage() {
     setMembers(prev => prev.map(m => m.id === memberId ? { ...m, role } : m));
   }
 
+  async function changeApproval(memberId, approvalStatus) {
+    await supabase.from('profiles').update({
+      approval_status: approvalStatus,
+      reviewed_at: new Date().toISOString(),
+      reviewed_by: currentUserId,
+    }).eq('id', memberId);
+    setMembers(prev => prev.map(m => m.id === memberId ? {
+      ...m,
+      approval_status: approvalStatus,
+      reviewed_at: new Date().toISOString(),
+      reviewed_by: currentUserId,
+    } : m));
+  }
+
   async function deleteUser(memberId) {
-    // Delete all related data first
-    await Promise.all([
-      supabase.from('time_entries').delete().eq('user_id', memberId),
-      supabase.from('task_comments').delete().eq('user_id', memberId),
-    ]);
-    // Delete profile (auth user deletion requires admin API, so we just clear profile)
-    await supabase.from('profiles').delete().eq('id', memberId);
-    setMembers(prev => prev.filter(m => m.id !== memberId));
-    setConfirmDelete(null);
+    setDeleteError('');
+    setDeletingId(memberId);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      if (!token) throw new Error('Your session expired. Please log in again.');
+
+      const response = await fetch('/api/admin/delete-user', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ userId: memberId }),
+      });
+
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.error || 'Could not delete user.');
+
+      setMembers(prev => prev.filter(m => m.id !== memberId));
+      setConfirmDelete(null);
+    } catch (error) {
+      setDeleteError(error.message || 'Could not delete user.');
+    } finally {
+      setDeletingId(null);
+    }
   }
 
   return (
@@ -129,11 +167,18 @@ export default function TeamPage() {
               </div>
             </div>
             <p className="text-subhead text-ios-secondary mb-5">
-              This will remove their profile and time entries. This cannot be undone.
+              This will remove login access, hide their board and assignments, and keep their time history and comments for reporting.
             </p>
+            {deleteError && (
+              <div className="mb-4 rounded-ios bg-red-50 border border-red-100 px-3 py-2 text-footnote text-ios-red">
+                {deleteError}
+              </div>
+            )}
             <div className="flex gap-3">
-              <button className="btn-secondary flex-1" onClick={() => setConfirmDelete(null)}>Cancel</button>
-              <button className="btn-danger flex-1" onClick={() => deleteUser(confirmDelete.id)}>Delete</button>
+              <button className="btn-secondary flex-1" onClick={() => { setConfirmDelete(null); setDeleteError(''); }} disabled={deletingId === confirmDelete.id}>Cancel</button>
+              <button className="btn-danger flex-1" onClick={() => deleteUser(confirmDelete.id)} disabled={deletingId === confirmDelete.id}>
+                {deletingId === confirmDelete.id ? 'Deleting...' : 'Delete'}
+              </button>
             </div>
           </div>
         </div>
@@ -144,6 +189,7 @@ export default function TeamPage() {
           const isMe = m.id === currentUserId;
           const roleKey = m.role || 'operator';
           const role = ROLES[roleKey] || ROLES.operator;
+          const approvalStatus = m.approval_status || 'approved';
           const Icon = role.icon;
           const st = stats[m.id] || { week: 0, month: 0 };
           const initials = (m.full_name || m.email || 'U').split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2);
@@ -165,6 +211,15 @@ export default function TeamPage() {
                     <span className={`text-caption2 font-semibold px-1.5 py-0.5 rounded-full flex items-center gap-1 ${role.badge}`}>
                       <Icon className="w-2.5 h-2.5" />{role.label}
                     </span>
+                    <span className={`text-caption2 font-semibold px-1.5 py-0.5 rounded-full ${
+                      approvalStatus === 'approved'
+                        ? 'bg-green-100 text-ios-green'
+                        : approvalStatus === 'rejected'
+                          ? 'bg-red-100 text-ios-red'
+                          : 'bg-orange-100 text-ios-orange'
+                    }`}>
+                      {approvalStatus === 'approved' ? 'Approved' : approvalStatus === 'rejected' ? 'Rejected' : 'Pending'}
+                    </span>
                   </div>
                   <p className="text-footnote text-ios-secondary truncate">{m.email}</p>
                   <div className="flex gap-4 mt-1">
@@ -184,6 +239,29 @@ export default function TeamPage() {
 
               {isAdmin && !isMe && (
                 <div className="mt-3 pt-3 border-t border-ios-separator/30">
+                  <p className="text-caption1 text-ios-tertiary mb-2 uppercase tracking-wide font-semibold">Access</p>
+                  <div className="flex gap-2 mb-3">
+                    <button
+                      onClick={() => changeApproval(m.id, 'approved')}
+                      className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-ios text-caption1 font-semibold transition-all border ${
+                        approvalStatus === 'approved'
+                          ? 'bg-green-50 text-ios-green border-green-200'
+                          : 'bg-ios-fill text-ios-secondary border-transparent hover:bg-green-50'
+                      }`}
+                    >
+                      <Check className="w-3 h-3" /> Approve
+                    </button>
+                    <button
+                      onClick={() => changeApproval(m.id, 'rejected')}
+                      className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-ios text-caption1 font-semibold transition-all border ${
+                        approvalStatus === 'rejected'
+                          ? 'bg-red-50 text-ios-red border-red-200'
+                          : 'bg-ios-fill text-ios-secondary border-transparent hover:bg-red-50'
+                      }`}
+                    >
+                      <X className="w-3 h-3" /> Reject
+                    </button>
+                  </div>
                   <p className="text-caption1 text-ios-tertiary mb-2 uppercase tracking-wide font-semibold">Role</p>
                   <div className="flex gap-2">
                     {Object.entries(ROLES).map(([key, r]) => {

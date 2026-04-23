@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
+import { ensureDueTodayTaskNotifications } from '@/lib/notifications';
 import { AtSign, Bell, BriefcaseBusiness, CheckCheck, Clock3, MessageCircle, ReceiptText, Sparkles, X } from 'lucide-react';
 
 function labelFor(type) {
@@ -75,7 +76,7 @@ function playNotificationSound() {
   const context = new AudioContext();
   const master = context.createGain();
   master.gain.setValueAtTime(0.0001, context.currentTime);
-  master.gain.exponentialRampToValueAtTime(0.045, context.currentTime + 0.02);
+  master.gain.exponentialRampToValueAtTime(0.13, context.currentTime + 0.02);
   master.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + 0.72);
   master.connect(context.destination);
 
@@ -109,10 +110,12 @@ export default function NotificationBell() {
   const unread = items.filter(n => !n.read_at).length;
 
   useEffect(() => {
-    supabase.auth.getUser().then(({ data: { user } }) => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      const user = session?.user;
       if (!user) return;
       setUserId(user.id);
       load(user.id);
+      ensureDueTodayTaskNotifications(user.id);
     });
   }, []);
 
@@ -221,11 +224,14 @@ export default function NotificationBell() {
   }
 
   return (
-    <div ref={ref} className="fixed top-8 right-4 -translate-y-1/2 z-50 lg:right-6">
+    <div ref={ref} className="relative z-50">
       <button onClick={() => { setOpen(v => !v); if (!open) load(); }}
-        className={`relative w-11 h-11 rounded-ios-lg bg-white/95 backdrop-blur-ios border border-ios-separator/40 shadow-ios flex items-center justify-center transition-all hover:-translate-y-0.5 hover:shadow-ios-lg active:scale-95 ${unread > 0 ? 'text-ios-blue ring-4 ring-blue-50' : 'text-ios-secondary hover:text-ios-primary'}`}
+        className={`relative h-11 rounded-ios-lg border shadow-ios flex items-center justify-center transition-all hover:-translate-y-0.5 hover:shadow-ios-lg active:scale-95 ${unread > 0 ? 'px-3.5 gap-2.5 bg-blue-50 border-blue-200 text-ios-blue ring-4 ring-blue-100' : 'w-11 bg-white border-ios-separator/70 text-ios-secondary hover:text-ios-primary hover:border-ios-separator'}`}
         title="Notifications">
         <Bell className="w-5 h-5" />
+        {unread > 0 && (
+          <span className="hidden sm:block text-footnote font-semibold whitespace-nowrap">Notifications</span>
+        )}
         {unread > 0 && (
           <span className="absolute -top-1.5 -right-1.5 min-w-5 h-5 px-1 rounded-full bg-ios-red text-white text-[10px] font-bold flex items-center justify-center shadow-ios animate-pulse">
             {unread > 9 ? '9+' : unread}
@@ -234,8 +240,8 @@ export default function NotificationBell() {
       </button>
 
       {open && (
-        <div className="absolute right-0 mt-3 w-[min(24rem,calc(100vw-2rem))] bg-white/95 backdrop-blur-ios rounded-2xl shadow-ios-modal border border-ios-separator/40 overflow-hidden animate-in fade-in zoom-in-95 duration-150">
-          <div className="px-4 py-3 border-b border-ios-separator/30 flex items-center justify-between bg-ios-bg/60">
+        <div className="absolute right-0 mt-3 w-[min(24rem,calc(100vw-1.5rem))] bg-white rounded-[22px] shadow-ios-modal border border-ios-separator/60 overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+          <div className="px-4 py-3 border-b border-ios-separator/30 flex items-center justify-between bg-white">
             <div>
               <div className="flex items-center gap-2">
                 <p className="text-subhead font-bold text-ios-primary">Notifications</p>
@@ -258,7 +264,7 @@ export default function NotificationBell() {
               </button>
             </div>
           </div>
-          <div className="max-h-[70vh] overflow-y-auto p-2">
+          <div className="max-h-[70vh] overflow-y-auto p-2 bg-ios-bg/70">
             {items.length === 0 ? (
               <div className="p-8 text-center">
                 <div className="w-12 h-12 rounded-full bg-blue-50 text-ios-blue flex items-center justify-center mx-auto mb-3">
@@ -272,10 +278,10 @@ export default function NotificationBell() {
               const Icon = style.icon;
               return (
                 <div key={n.id}
-                  className={`relative w-full p-3 rounded-ios-lg transition-all mb-1 border ${n.read_at ? 'border-transparent hover:bg-ios-bg opacity-75' : 'bg-white border-blue-100 shadow-ios-sm hover:shadow-ios'}`}>
+                  className={`relative w-full p-3 rounded-[18px] transition-all mb-2 border ${n.read_at ? 'bg-white border-ios-separator/30 hover:bg-ios-bg/70 opacity-90' : 'bg-white border-blue-100 shadow-ios-sm hover:shadow-ios'}`}>
                   <div className="flex items-start gap-3">
                     <button onClick={() => markRead(n)}
-                      className={`w-9 h-9 rounded-ios flex items-center justify-center shrink-0 ring-1 ${style.bg} ${style.text} ${style.ring}`}
+                      className={`w-9 h-9 rounded-[14px] flex items-center justify-center shrink-0 ring-1 ${style.bg} ${style.text} ${style.ring}`}
                       title="Open notification">
                       <Icon className="w-4 h-4" />
                     </button>

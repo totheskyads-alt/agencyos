@@ -1,6 +1,6 @@
 'use client';
 import { useState, useEffect } from 'react';
-import { supabase } from '@/lib/supabase';
+import { getProjectAccess } from '@/lib/projectAccess';
 
 export const ROLE_PERMISSIONS = {
   admin: {
@@ -46,12 +46,13 @@ export function useRole() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    supabase.auth.getUser().then(async ({ data: { user } }) => {
-      if (!user) { setLoading(false); return; }
-      const { data } = await supabase.from('profiles').select('*').eq('id', user.id).single();
-      setProfile(data);
+    let mounted = true;
+    getProjectAccess().then((access) => {
+      if (!mounted) return;
+      setProfile(access?.profile || null);
       setLoading(false);
     });
+    return () => { mounted = false; };
   }, []);
 
   const role = profile?.role || 'operator';

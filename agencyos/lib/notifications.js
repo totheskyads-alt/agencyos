@@ -13,6 +13,37 @@ export async function createNotification({
   if (!userId || !type || !title) return { error: null };
 
   const payload = {
+    userId,
+    type,
+    title,
+    body,
+    entityType,
+    entityId,
+    entityUrl,
+    eventKey,
+  };
+
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    const token = session?.access_token;
+    if (token) {
+      const response = await fetch('/api/notifications/create', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(payload),
+      });
+      if (response.ok) return { error: null };
+      const serverResult = await response.json().catch(() => ({}));
+      console.warn('Notification API could not save notification', serverResult?.error || response.statusText);
+    }
+  } catch (error) {
+    console.warn('Notification API fallback triggered', error);
+  }
+
+  const dbPayload = {
     user_id: userId,
     type,
     title,
@@ -24,8 +55,8 @@ export async function createNotification({
   };
 
   const query = eventKey
-    ? supabase.from('notifications').upsert(payload, { onConflict: 'user_id,event_key', ignoreDuplicates: true })
-    : supabase.from('notifications').insert(payload);
+    ? supabase.from('notifications').upsert(dbPayload, { onConflict: 'user_id,event_key', ignoreDuplicates: true })
+    : supabase.from('notifications').insert(dbPayload);
 
   const result = await query;
   if (result.error) console.warn('Notification could not be saved', result.error);
@@ -146,4 +177,36 @@ export async function ensureBillingReminderNotifications(adminUserId) {
       entityUrl: `/dashboard/billing?newInvoice=1&client=${p.client_id}${p.id ? `&project=${p.id}` : ''}`,
       eventKey: `invoice_due:${year}:${month}:${p.id}`,
     })));
+}
+
+export async function ensureDueTodayTaskNotifications(userId) {
+  if (!userId) return;
+
+  const now = new Date();
+  if (now.getHours() < 8) return;
+
+  const todayIso = now.toISOString().slice(0, 10);
+  const { data: tasks, error } = await supabase
+    .from('tasks')
+    .select('id,title,project_id')
+    .eq('assigned_to', userId)
+    .eq('due_date', todayIso)
+    .or('is_archived.eq.false,is_archived.is.null')
+    .neq('status', 'done');
+
+  if (error) {
+    console.warn('Due today task notifications could not be loaded', error);
+    return;
+  }
+
+  await Promise.all((tasks || []).map(task => createNotification({
+    userId,
+    type: 'task_assigned',
+    title: 'Task due today',
+    body: task.title || 'You have a task due today.',
+    entityType: 'task',
+    entityId: task.id,
+    entityUrl: `/dashboard/tasks?task=${task.id}&mode=list${task.project_id ? `&project=${task.project_id}` : ''}`,
+    eventKey: `due_today:${todayIso}:${task.id}:${userId}`,
+  })));
 }

@@ -1,14 +1,35 @@
 import { supabase } from '@/lib/supabase';
 
-export async function getProjectAccess() {
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return { user: null, profile: null, role: 'operator', projectIds: [], isRestricted: true, tableMissing: false };
+const ACCESS_CACHE_TTL = 15000;
+let accessCache = null;
+let accessCacheAt = 0;
+
+export function invalidateProjectAccessCache() {
+  accessCache = null;
+  accessCacheAt = 0;
+}
+
+export async function getProjectAccess(options = {}) {
+  const { forceRefresh = false } = options;
+  if (!forceRefresh && accessCache && Date.now() - accessCacheAt < ACCESS_CACHE_TTL) {
+    return accessCache;
+  }
+
+  const { data: { session } } = await supabase.auth.getSession();
+  const user = session?.user;
+  if (!user) {
+    accessCache = { user: null, profile: null, role: 'operator', projectIds: [], isRestricted: true, tableMissing: false };
+    accessCacheAt = Date.now();
+    return accessCache;
+  }
 
   const { data: profile } = await supabase.from('profiles').select('*').eq('id', user.id).single();
   const role = profile?.role || 'operator';
 
   if (role === 'admin') {
-    return { user, profile, role, projectIds: null, isRestricted: false, tableMissing: false };
+    accessCache = { user, profile, role, projectIds: null, isRestricted: false, tableMissing: false };
+    accessCacheAt = Date.now();
+    return accessCache;
   }
 
   const { data: memberships, error } = await supabase
@@ -18,10 +39,12 @@ export async function getProjectAccess() {
 
   if (error) {
     console.warn('Project access table not available yet', error);
-    return { user, profile, role, memberships: [], projectIds: [], isRestricted: true, tableMissing: true };
+    accessCache = { user, profile, role, memberships: [], projectIds: [], isRestricted: true, tableMissing: true };
+    accessCacheAt = Date.now();
+    return accessCache;
   }
 
-  return {
+  accessCache = {
     user,
     profile,
     role,
@@ -30,6 +53,8 @@ export async function getProjectAccess() {
     isRestricted: true,
     tableMissing: false,
   };
+  accessCacheAt = Date.now();
+  return accessCache;
 }
 
 export function canSeeProject(access, projectId) {
@@ -44,11 +69,14 @@ export function visibleClientIdsFromProjects(projects) {
 export async function grantProjectAccess(projectId, userId, roleOnProject = 'member') {
   if (!projectId || !userId) return { error: null };
 
-  return supabase.from('project_members').upsert({
+  const result = await supabase.from('project_members').upsert({
     project_id: projectId,
     user_id: userId,
     role_on_project: roleOnProject,
   }, {
     onConflict: 'project_id,user_id',
   });
+
+  invalidateProjectAccessCache();
+  return result;
 }

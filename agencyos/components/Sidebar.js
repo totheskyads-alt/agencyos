@@ -3,8 +3,7 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { useRole } from '@/lib/useRole';
-import { LayoutDashboard, Timer, Users, FolderOpen, CheckSquare, BarChart3, UsersRound, LogOut, Menu, X, Receipt, Bug } from 'lucide-react';
-import { useState } from 'react';
+import { LayoutDashboard, Timer, Users, FolderOpen, CheckSquare, BarChart3, UsersRound, LogOut, Receipt, Bug } from 'lucide-react';
 
 const ALL_NAV = [
   { href: '/dashboard',          icon: LayoutDashboard, label: 'Dashboard',    permission: null },
@@ -18,11 +17,10 @@ const ALL_NAV = [
   { href: '/dashboard/bugs',     icon: Bug,             label: 'Bug Tracker',  permission: null },
 ];
 
-export default function Sidebar({ user, profile }) {
+export default function Sidebar({ user, profile, open = false, setOpen = () => {} }) {
   const pathname = usePathname();
   const router = useRouter();
   const { can, role } = useRole();
-  const [open, setOpen] = useState(false);
 
   const nav = ALL_NAV.filter(item => !item.permission || can(item.permission));
   const logout = async () => { await supabase.auth.signOut(); router.push('/login'); };
@@ -32,29 +30,19 @@ export default function Sidebar({ user, profile }) {
 
   return (
     <>
-      <div className="lg:hidden fixed top-0 left-0 right-0 z-40 bg-white/90 backdrop-blur-ios border-b border-ios-separator/50 px-4 py-3 flex items-center gap-3">
-        <button onClick={() => setOpen(!open)} className="p-2 -ml-2 rounded-ios hover:bg-ios-fill">
-          {open ? <X className="w-5 h-5 text-ios-secondary" /> : <Menu className="w-5 h-5 text-ios-secondary" />}
-        </button>
-        <div className="flex items-center gap-2">
-          <img src="/logo.jpg" alt="Sky Metrics" className="w-8 h-8 rounded-full object-cover" />
-          <span className="text-headline font-bold text-ios-primary">Sky Metrics</span>
-        </div>
-      </div>
-
       {open && <div className="lg:hidden fixed inset-0 bg-black/30 z-30 backdrop-blur-sm" onClick={() => setOpen(false)} />}
 
       <aside className={`fixed left-0 top-0 h-full w-60 bg-white/95 backdrop-blur-ios border-r border-ios-separator/30 z-40 transition-transform duration-300 lg:translate-x-0 ${open ? 'translate-x-0' : '-translate-x-full'}`}>
         <div className="flex flex-col h-full">
           {/* Logo */}
           <div className="px-5 py-5 border-b border-ios-separator/30">
-            <div className="flex items-center gap-3">
+            <Link href="/dashboard" onClick={() => setOpen(false)} className="flex items-center gap-3 rounded-ios hover:opacity-90 transition-opacity">
               <img src="/logo.jpg" alt="Sky Metrics" className="w-10 h-10 rounded-full object-cover shadow-ios-sm ring-2 ring-ios-blue/20" />
               <div>
                 <p className="text-headline font-bold text-ios-primary">Sky Metrics</p>
                 <p className="text-caption1 text-ios-secondary">v2.0</p>
               </div>
-            </div>
+            </Link>
           </div>
 
           {/* Nav */}

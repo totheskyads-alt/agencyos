@@ -1,7 +1,7 @@
 'use client';
 import { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
-import { getElapsed } from '@/lib/utils';
+import { getElapsed, parseUTC } from '@/lib/utils';
 
 const TimerContext = createContext(null);
 
@@ -16,12 +16,31 @@ export function TimerProvider({ children }) {
   const intervalRef = useRef(null);
   const pollRef = useRef(null);
   const activeTimerRef = useRef(null);
+  const pauseStateRef = useRef({ isPaused: false, pausedAt: null, pauseSeconds: 0 });
   const lockRef = useRef(false); // prevents poll from interfering during start/stop
 
   useEffect(() => { activeTimerRef.current = activeTimer; }, [activeTimer]);
+  useEffect(() => {
+    pauseStateRef.current = { isPaused, pausedAt, pauseSeconds };
+  }, [isPaused, pausedAt, pauseSeconds]);
+
+  function getTrackedDuration(entry) {
+    if (!entry?.start_time) return 1;
+    const total = getElapsed(entry.start_time);
+    const pauseState = pauseStateRef.current;
+    const storedPause = Number(entry.pause_seconds ?? pauseState.pauseSeconds ?? 0) || 0;
+    const pauseStartedAt = pauseState.isPaused
+      ? pauseState.pausedAt
+      : entry.paused_at
+        ? parseUTC(entry.paused_at)?.getTime()
+        : null;
+    const activePause = pauseStartedAt ? Math.max(0, Math.round((Date.now() - pauseStartedAt) / 1000)) : 0;
+    return Math.max(1, total - storedPause - activePause);
+  }
 
   useEffect(() => {
-    supabase.auth.getUser().then(({ data: { user } }) => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      const user = session?.user;
       if (user) { setUserId(user.id); loadTimer(user.id); }
     });
     return () => { clearInterval(intervalRef.current); clearInterval(pollRef.current); };
@@ -50,7 +69,7 @@ export function TimerProvider({ children }) {
     const { data: rows } = await supabase.from('time_entries')
       .select('*, projects(name,color), tasks(title)')
       .eq('user_id', uid || userId).is('end_time', null)
-      .order('created_at', { ascending: false }).limit(1);
+      .order('created_at', { ascending: false }).limit(5);
     const data = rows?.[0] || null;
 
     // Clean up ghost entries (older duplicates with no end_time)
@@ -91,7 +110,7 @@ export function TimerProvider({ children }) {
     try {
       const cur = activeTimerRef.current;
       if (cur) {
-        const dur = Math.max(1, getElapsed(cur.start_time));
+        const dur = getTrackedDuration(cur);
         await supabase.from('time_entries')
           .update({ end_time: new Date().toISOString(), duration_seconds: dur })
           .eq('id', cur.id);
@@ -117,7 +136,7 @@ export function TimerProvider({ children }) {
     if (!cur) return;
     lockRef.current = true;
     try {
-      const dur = Math.max(1, getElapsed(cur.start_time));
+      const dur = getTrackedDuration(cur);
       const { data: stopped } = await supabase.from('time_entries')
         .update({ end_time: new Date().toISOString(), duration_seconds: dur })
         .eq('id', cur.id)

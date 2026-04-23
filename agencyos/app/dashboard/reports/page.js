@@ -83,7 +83,7 @@ export default function ReportsPage() {
 
     const [{ data: cli }, { data: mem }] = await Promise.all([
       clientQuery || Promise.resolve({ data: [] }),
-      supabase.from('profiles').select('id,full_name,email').order('full_name'),
+      supabase.from('profiles').select('id,full_name,email').or('is_deleted.is.null,is_deleted.eq.false').order('full_name'),
     ]);
     setProjects(visibleProjects);
     setClients(cli || []);

@@ -33,15 +33,25 @@ export default function LoginPage() {
       if (error) { setError(error.message); setLoading(false); return; }
       router.push('/dashboard');
     } else {
-      const { data, error } = await supabase.auth.signUp({ email, password });
+      const { data, error } = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
+          data: {
+            full_name: email.split('@')[0],
+          },
+        },
+      });
       if (error) { setError(error.message); setLoading(false); return; }
       if (data.user) {
         await supabase.from('profiles').upsert({
           id: data.user.id, email, role: 'operator',
           full_name: email.split('@')[0],
+          approval_status: 'pending',
         });
       }
-      setSuccess('Account created! You can now sign in.');
+      await supabase.auth.signOut();
+      setSuccess('Account created. If you receive a verification email, confirm it first. Then wait for admin approval.');
       setMode('login'); setPassword(''); setConfirmPassword(''); setLoading(false);
     }
   }

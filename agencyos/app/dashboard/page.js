@@ -68,12 +68,11 @@ export default function DashboardPage() {
   useEffect(() => { load(); }, []);
 
   async function load() {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
-    const { data: p } = await supabase.from('profiles').select('*').eq('id', user.id).single();
-    setProfile(p);
-    if (p?.role === 'admin') await ensureBillingReminderNotifications(user.id);
     const accessInfo = await getProjectAccess();
+    const user = accessInfo.user;
+    if (!user) return;
+    setProfile(accessInfo.profile || null);
+    if (accessInfo.role === 'admin') await ensureBillingReminderNotifications(user.id);
 
     const now = new Date();
     const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
@@ -125,11 +124,10 @@ export default function DashboardPage() {
     setMonthSecs((monthEnt||[]).reduce((a,e)=>a+(e.duration_seconds||0),0));
     setClientCount(cli?.length||0); setProjectCount(visibleProjects?.length||0);
     // Count tasks visible to this user (same logic as tasks page)
-    const { data: myProfile } = await supabase.from('profiles').select('role').eq('id', user.id).single();
     let taskCount = tasks?.length || 0;
-    if (myProfile?.role === 'operator') {
+    if (accessInfo.role === 'operator') {
       taskCount = (tasks||[]).filter(t => t.assigned_to === user.id).length;
-    } else if (myProfile?.role === 'manager') {
+    } else if (accessInfo.role === 'manager') {
       const { data: adminIds } = await supabase.from('profiles').select('id').eq('role','admin');
       const adminSet = new Set((adminIds||[]).map(a => a.id));
       taskCount = (tasks||[]).filter(t => !adminSet.has(t.assigned_to)).length;

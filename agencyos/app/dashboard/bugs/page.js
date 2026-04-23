@@ -31,7 +31,8 @@ export default function BugsPage() {
       if (ideaDraft) setIdeaForm(JSON.parse(ideaDraft));
     } catch {}
     setDraftsLoaded(true);
-    supabase.auth.getUser().then(async ({ data: { user } }) => {
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
+      const user = session?.user;
       if (user) {
         setCurrentUserId(user.id);
         const { data: p } = await supabase.from('profiles').select('full_name,nickname').eq('id', user.id).single();

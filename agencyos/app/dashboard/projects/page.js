@@ -76,7 +76,7 @@ export default function ProjectsPage() {
 
     const [{ data: proj }, { data: mem }] = await Promise.all([
       projectQuery,
-      supabase.from('profiles').select('id,full_name,email,role').order('full_name'),
+      supabase.from('profiles').select('id,full_name,email,role').or('is_deleted.is.null,is_deleted.eq.false').order('full_name'),
     ]);
     const visibleProjects = proj || [];
     const visibleClientIds = visibleClientIdsFromProjects(visibleProjects);
@@ -149,7 +149,8 @@ export default function ProjectsPage() {
     if (!form.client_id) { alert('Please select or create a client — required!'); return; }
     if (!form.name.trim()) { alert('Project name is required.'); return; }
     setLoading(true);
-    const { data: { user } } = await supabase.auth.getUser();
+    const { data: { session } } = await supabase.auth.getSession();
+    const user = session?.user;
     const payload = { ...form, billing_day: form.billing_day ? parseInt(form.billing_day) : null, monthly_amount: form.monthly_amount ? parseFloat(form.monthly_amount) : null };
     let projectId = selected?.id;
     if (selected) {
