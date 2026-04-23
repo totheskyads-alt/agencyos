@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import Sidebar from '@/components/Sidebar';
 import GlobalTimer from '@/components/GlobalTimer';
+import NotificationBell from '@/components/NotificationBell';
 import { TimerProvider } from '@/lib/timerContext';
 
 export default function DashboardLayout({ children }) {
@@ -41,6 +42,7 @@ export default function DashboardLayout({ children }) {
             {children}
           </div>
         </main>
+        <NotificationBell />
         <GlobalTimer />
       </div>
     </TimerProvider>

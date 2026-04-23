@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useRole } from '@/lib/useRole';
+import { getProjectAccess, visibleClientIdsFromProjects } from '@/lib/projectAccess';
 import { fmtDuration, fmtCurrency, parseUTC } from '@/lib/utils';
 import { Clock, Euro, TrendingUp, TrendingDown, Users, BarChart3, Lock } from 'lucide-react';
 
@@ -64,12 +65,27 @@ export default function ReportsPage() {
   useEffect(() => { if (range !== 'custom' || customFrom) loadData(); }, [range, filterMember, filterProject, customFrom, customTo]);
 
   async function loadMeta() {
-    const [{ data: proj }, { data: cli }, { data: mem }] = await Promise.all([
-      supabase.from('projects').select('id,name,color,client_id,monthly_amount,billing_day,clients(name,client_type)').order('name'),
-      supabase.from('clients').select('id,name,client_type').order('name'),
+    const accessInfo = await getProjectAccess();
+    if (accessInfo.isRestricted && accessInfo.projectIds.length === 0) {
+      setProjects([]);
+      setClients([]);
+      setMembers([]);
+      return;
+    }
+    let projectQuery = supabase.from('projects').select('id,name,color,client_id,monthly_amount,billing_day,clients(name,client_type)').order('name');
+    if (accessInfo.isRestricted) projectQuery = projectQuery.in('id', accessInfo.projectIds);
+
+    const { data: proj } = await projectQuery;
+    const visibleProjects = proj || [];
+    const visibleClientIds = visibleClientIdsFromProjects(visibleProjects);
+    let clientQuery = supabase.from('clients').select('id,name,client_type').order('name');
+    if (accessInfo.isRestricted) clientQuery = visibleClientIds.length ? clientQuery.in('id', visibleClientIds) : null;
+
+    const [{ data: cli }, { data: mem }] = await Promise.all([
+      clientQuery || Promise.resolve({ data: [] }),
       supabase.from('profiles').select('id,full_name,email').order('full_name'),
     ]);
-    setProjects(proj || []);
+    setProjects(visibleProjects);
     setClients(cli || []);
     setMembers(mem || []);
   }
@@ -90,17 +106,33 @@ export default function ReportsPage() {
 
   async function loadData() {
     setLoading(true);
+    const accessInfo = await getProjectAccess();
+    if (accessInfo.isRestricted && accessInfo.projectIds.length === 0) {
+      setEntries([]);
+      setBilling([]);
+      setExpenses([]);
+      setLoading(false);
+      return;
+    }
     const from = getDateFrom();
     let q = supabase.from('time_entries')
       .select('*, profiles(full_name,email), projects(id,name,color,client_id,monthly_amount,clients(name,client_type))')
       .not('end_time', 'is', null).gte('created_at', from).order('created_at');
+    if (accessInfo.isRestricted) q = q.in('project_id', accessInfo.projectIds);
     if (filterMember) q = q.eq('user_id', filterMember);
     if (filterProject) q = q.eq('project_id', filterProject);
 
+    let billingQuery = supabase.from('billing').select('*, clients(name,client_type)').order('year').order('month');
+    if (accessInfo.isRestricted) {
+      const { data: visibleProjects } = await supabase.from('projects').select('client_id').in('id', accessInfo.projectIds);
+      const visibleClientIds = visibleClientIdsFromProjects(visibleProjects || []);
+      billingQuery = visibleClientIds.length ? billingQuery.in('client_id', visibleClientIds) : null;
+    }
+
     const [{ data: ent }, { data: bil }, { data: exp }] = await Promise.all([
       q,
-      supabase.from('billing').select('*, clients(name,client_type)').order('year').order('month'),
-      supabase.from('expenses').select('*').order('year').order('month'),
+      billingQuery || Promise.resolve({ data: [] }),
+      accessInfo.isRestricted ? Promise.resolve({ data: [] }) : supabase.from('expenses').select('*').order('year').order('month'),
     ]);
     setEntries(ent || []);
     setBilling(bil || []);

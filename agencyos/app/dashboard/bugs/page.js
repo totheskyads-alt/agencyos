@@ -1,7 +1,7 @@
 'use client';
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
-import { Download, Bug, Plus, Trash2, CheckCircle, Lightbulb, Edit2, X } from 'lucide-react';
+import { Download, Bug, Plus, Trash2, CheckCircle, Lightbulb, Edit2, X, Paperclip } from 'lucide-react';
 
 const CATEGORIES = ['UI/Design', 'Timer', 'Tasks', 'Billing', 'Reports', 'Projects', 'Clients', 'Auth', 'Other'];
 const EMPTY_BUG = { title: '', category: 'Other', description: '', steps: '', expected: '', actual: '', priority: 'medium' };
@@ -17,6 +17,7 @@ export default function BugsPage() {
   const [editingId, setEditingId] = useState(null);
   const [editingIdeaId, setEditingIdeaId] = useState(null);
   const [submitted, setSubmitted] = useState('');
+  const [bugScreenshot, setBugScreenshot] = useState(null);
 
   const [currentUserId, setCurrentUserId] = useState('');
   const [currentUserName, setCurrentUserName] = useState('');
@@ -58,7 +59,18 @@ export default function BugsPage() {
 
   async function submitBug() {
     if (!form.title.trim()) return;
-    const payload = { title: form.title, description: form.description, steps_to_reproduce: form.steps, expected_behavior: form.expected, actual_behavior: form.actual, environment: form.category, priority: form.priority };
+    let screenshotData = {};
+    if (bugScreenshot && !editingId) {
+      try {
+        const path = `bugs/${Date.now()}_${bugScreenshot.name}`;
+        const { error } = await supabase.storage.from('task-files').upload(path, bugScreenshot);
+        if (!error) {
+          const { data: { publicUrl } } = supabase.storage.from('task-files').getPublicUrl(path);
+          screenshotData = { screenshot_name: bugScreenshot.name, screenshot_url: publicUrl, screenshot_type: bugScreenshot.type };
+        }
+      } catch {}
+    }
+    const payload = { title: form.title, description: form.description, steps_to_reproduce: form.steps, expected_behavior: form.expected, actual_behavior: form.actual, environment: form.category, priority: form.priority, ...screenshotData };
     if (editingId) {
       await supabase.from('bugs').update(payload).eq('id', editingId);
       setEditingId(null);
@@ -67,6 +79,7 @@ export default function BugsPage() {
     }
     const empty = EMPTY_BUG;
     setForm(empty);
+    setBugScreenshot(null);
     try { localStorage.setItem('sm_bug_draft', JSON.stringify(empty)); } catch {}
     setSubmitted('bug'); setTimeout(() => setSubmitted(''), 3000);
     load();
@@ -102,7 +115,7 @@ export default function BugsPage() {
   function downloadBugs() {
     const openBugs = bugs.filter(b => b.status !== 'resolved');
     if (openBugs.length === 0) { alert('No open bugs to export.'); return; }
-    const md = `# Sky Metrics — Bug Report\nGenerated: ${new Date().toLocaleString()}\n\n---\n\n${openBugs.map((b, i) => `## Bug #${b.bug_number || i+1}: ${b.title}\n\n**Category:** ${b.environment || 'General'}\n**Priority:** ${b.priority}\n\n**Description:**\n${b.description || '—'}\n\n**Steps to Reproduce:**\n${b.steps_to_reproduce || '—'}\n\n**Expected:** ${b.expected_behavior || '—'}\n\n**Actual:** ${b.actual_behavior || '—'}\n\n---`).join('\n\n')}\n`;
+    const md = `# Sky Metrics — Bug Report\nGenerated: ${new Date().toLocaleString()}\n\n---\n\n${openBugs.map((b, i) => `## Bug #${b.bug_number || i+1}: ${b.title}\n\n**Category:** ${b.environment || 'General'}\n**Priority:** ${b.priority}\n\n**Description:**\n${b.description || '—'}\n\n**Screenshot:** ${b.screenshot_url || '—'}\n\n**Steps to Reproduce:**\n${b.steps_to_reproduce || '—'}\n\n**Expected:** ${b.expected_behavior || '—'}\n\n**Actual:** ${b.actual_behavior || '—'}\n\n---`).join('\n\n')}\n`;
     downloadMarkdown(`skymetrics-bugs-${new Date().toISOString().slice(0,10)}.md`, md);
   }
 
@@ -159,13 +172,24 @@ export default function BugsPage() {
                 <div><label className="input-label">Priority</label><select className="input" value={form.priority} onChange={e=>setForm(p=>({...p,priority:e.target.value}))}><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option><option value="critical">Critical</option></select></div>
               </div>
               <div><label className="input-label">What's the problem?</label><textarea className="input" rows={3} value={form.description} onChange={e=>setForm(p=>({...p,description:e.target.value}))} placeholder="Describe what's not working..."/></div>
+              <div>
+                <label className="input-label">Screenshot</label>
+                <label className="flex items-center justify-between gap-3 px-3.5 py-3 rounded-ios bg-ios-fill cursor-pointer hover:bg-ios-fill2 transition-colors">
+                  <span className="flex items-center gap-2 text-subhead text-ios-secondary min-w-0">
+                    <Paperclip className="w-4 h-4 shrink-0" />
+                    <span className="truncate">{bugScreenshot ? bugScreenshot.name : 'Add image for context'}</span>
+                  </span>
+                  <span className="text-caption1 font-semibold text-ios-blue">Choose</span>
+                  <input type="file" accept="image/*" className="hidden" onChange={e => setBugScreenshot(e.target.files?.[0] || null)} />
+                </label>
+              </div>
               <div><label className="input-label">Steps to reproduce</label><textarea className="input" rows={3} value={form.steps} onChange={e=>setForm(p=>({...p,steps:e.target.value}))} placeholder={"1. Go to...\n2. Click...\n3. See error"}/></div>
               <div className="grid grid-cols-2 gap-3">
                 <div><label className="input-label">Expected</label><textarea className="input" rows={2} value={form.expected} onChange={e=>setForm(p=>({...p,expected:e.target.value}))} placeholder="What should happen?"/></div>
                 <div><label className="input-label">Actual</label><textarea className="input" rows={2} value={form.actual} onChange={e=>setForm(p=>({...p,actual:e.target.value}))} placeholder="What happens instead?"/></div>
               </div>
               <div className="flex gap-2">
-                {editingId && <button onClick={() => { setEditingId(null); setForm(EMPTY_BUG); }} className="btn-secondary"><X className="w-4 h-4"/></button>}
+                {editingId && <button onClick={() => { setEditingId(null); setForm(EMPTY_BUG); setBugScreenshot(null); }} className="btn-secondary"><X className="w-4 h-4"/></button>}
                 <button onClick={submitBug} disabled={!form.title.trim()} className="btn-primary flex-1">
                   {editingId ? 'Update Bug' : 'Save Bug Report'}
                 </button>
@@ -189,6 +213,7 @@ export default function BugsPage() {
                     <p className="text-subhead font-semibold">{b.title}</p>
                     {b.reporter && <p className="text-caption1 text-ios-tertiary">by {b.reporter.nickname || b.reporter.full_name || b.reporter.email}</p>}
                     {b.description && <p className="text-footnote text-ios-secondary mt-0.5 line-clamp-2">{b.description}</p>}
+                    {b.screenshot_url && <a href={b.screenshot_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-caption1 text-ios-blue font-semibold mt-2 hover:underline"><Paperclip className="w-3 h-3"/>Screenshot</a>}
                   </div>
                   <div className="flex gap-1.5 shrink-0">
                     <button onClick={() => { setForm({ title:b.title, category:b.environment||'Other', description:b.description||'', steps:b.steps_to_reproduce||'', expected:b.expected_behavior||'', actual:b.actual_behavior||'', priority:b.priority||'medium' }); setEditingId(b.id); window.scrollTo({top:0,behavior:'smooth'}); }} className="p-1.5 rounded hover:bg-blue-50 text-ios-tertiary hover:text-ios-blue"><Edit2 className="w-3.5 h-3.5"/></button>

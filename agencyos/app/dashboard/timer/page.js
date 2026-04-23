@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useTimer } from '@/lib/timerContext';
+import { getProjectAccess } from '@/lib/projectAccess';
 import { fmtClock, fmtDuration, fmtTime, parseUTC } from '@/lib/utils';
 import { Square, Pause, Play, Edit2, Trash2, Plus, X, RotateCcw } from 'lucide-react';
 import Modal from '@/components/Modal';
@@ -41,10 +42,22 @@ export default function TimerPage() {
 
   async function loadData(u) {
     if (!u) return;
+    const accessInfo = await getProjectAccess();
+    if (accessInfo.isRestricted && accessInfo.projectIds.length === 0) {
+      setProjects([]);
+      setEntries([]);
+      return;
+    }
+    let projectQuery = supabase.from('projects').select('id,name,color,clients(name)').eq('status','active').order('name');
+    let entriesQuery = supabase.from('time_entries').select('*, projects(name,color,clients(name)), tasks(title)')
+      .eq('user_id', u.id).not('end_time','is',null).order('start_time',{ascending:false}).limit(60);
+    if (accessInfo.isRestricted) {
+      projectQuery = projectQuery.in('id', accessInfo.projectIds);
+      entriesQuery = entriesQuery.in('project_id', accessInfo.projectIds);
+    }
     const [{ data: proj }, { data: ent }] = await Promise.all([
-      supabase.from('projects').select('id,name,color,clients(name)').eq('status','active').order('name'),
-      supabase.from('time_entries').select('*, projects(name,color,clients(name)), tasks(title)')
-        .eq('user_id', u.id).not('end_time','is',null).order('start_time',{ascending:false}).limit(60),
+      projectQuery,
+      entriesQuery,
     ]);
     setProjects(proj||[]);
     setEntries(ent||[]);

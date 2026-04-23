@@ -1,10 +1,13 @@
 'use client';
 import { useState, useEffect, useRef } from 'react';
+import { flushSync } from 'react-dom';
 import { supabase } from '@/lib/supabase';
 import Modal from '@/components/Modal';
 import { fmtDate, fmtClock } from '@/lib/utils';
 import { useRole } from '@/lib/useRole';
 import { useTimer } from '@/lib/timerContext';
+import { getProjectAccess, grantProjectAccess } from '@/lib/projectAccess';
+import { createTaskAssignedNotification, createCommentMentionNotification, findMentionedUsers } from '@/lib/notifications';
 import { useSearchParams } from 'next/navigation';
 import {
   Plus, Search, ChevronDown, ArrowLeft, MessageSquare,
@@ -29,6 +32,33 @@ const PRIORITY = {
 const COL_COLORS = ['#007AFF','#34C759','#FF9500','#FF3B30','#AF52DE','#32ADE6','#5856D6','#FF2D55','#AEAEB2'];
 const VIEW_KEY = 'agencyos_tasks_view';
 const ARCHIVED_PAGE_SIZE = 10;
+
+function renderCommentText(content) {
+  return content.split(/(\s+)/).map((part, i) => {
+    if (!part) return null;
+    if (part.startsWith('http://') || part.startsWith('https://')) {
+      return (
+        <a key={i} href={part} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()} className="text-ios-blue underline">
+          {part}
+        </a>
+      );
+    }
+    if (/^@[\p{L}\p{N}._-]+$/u.test(part)) {
+      return <span key={i} className="font-semibold text-ios-blue bg-blue-50 px-1 rounded">{part}</span>;
+    }
+    return <span key={i}>{part}</span>;
+  });
+}
+
+function mentionTagFor(member) {
+  const firstName = (member.full_name || '').trim().split(/\s+/)[0];
+  return (firstName || (member.email || '').split('@')[0] || '').replace(/[^\p{L}\p{N}._-]/gu, '');
+}
+
+function activeMentionQuery(value) {
+  const match = value.match(/(?:^|\s)@([\p{L}\p{N}._-]*)$/u);
+  return match ? match[1].toLowerCase() : null;
+}
 
 
 // ─── Download File Helper ─────────────────────────────────────────────────────
@@ -102,6 +132,7 @@ function TaskDetail({ task, members, boardColumns, projects, labels: allLabels, 
   const [comments, setComments] = useState([]);
   const [taskLabels, setTaskLabels] = useState([]);
   const [newComment, setNewComment] = useState('');
+  const [mentionQuery, setMentionQuery] = useState(null);
   const [commentFile, setCommentFile] = useState(null);
   const [editingCommentId, setEditingCommentId] = useState(null);
   const [editingCommentText, setEditingCommentText] = useState('');
@@ -124,6 +155,7 @@ function TaskDetail({ task, members, boardColumns, projects, labels: allLabels, 
   const projRef = useRef(null);
   const labelRef = useRef(null);
   const fileRef = useRef(null);
+  const commentRef = useRef(null);
 
   useEffect(() => {
     if (task?.id) { loadComments(); loadLabels(); }
@@ -181,18 +213,31 @@ function TaskDetail({ task, members, boardColumns, projects, labels: allLabels, 
     if (!form.title.trim() || !form.project_id) return;
     setLoading(true);
     const payload = { ...form, assigned_to: form.assigned_to || null, due_date: form.due_date || null, column_id: form.column_id || boardColumns[0]?.id || null };
+    let savedTask = task?.id ? { ...task, ...payload } : null;
     if (task?.id) {
       await supabase.from('tasks').update(payload).eq('id', task.id);
     } else {
       const { data: saved } = await supabase.from('tasks')
         .insert({ ...payload, status: 'todo', position: 9999 })
         .select().single();
+      savedTask = saved;
       // Apply pending labels
       if (saved && pendingLabels.length > 0) {
         await Promise.all(pendingLabels.map(l =>
           supabase.from('task_labels').insert({ task_id: saved.id, label_id: l.id })
         ));
       }
+    }
+    if (payload.project_id && payload.assigned_to) {
+      const { error } = await grantProjectAccess(payload.project_id, payload.assigned_to);
+      if (error) console.warn('Could not grant project access from task assignment', error);
+    }
+    if (savedTask && payload.assigned_to && payload.assigned_to !== task?.assigned_to) {
+      await createTaskAssignedNotification({
+        task: savedTask,
+        assignedUserId: payload.assigned_to,
+        actorId: currentUser?.id,
+      });
     }
     setLoading(false); onSave();
   }
@@ -217,6 +262,7 @@ function TaskDetail({ task, members, boardColumns, projects, labels: allLabels, 
     if (!newComment.trim() && !commentFile) return;
     setSending(true);
     let fileData = null;
+    const commentText = newComment.trim();
     if (commentFile) {
       try {
         const path = `tasks/${task.id}/comments/${Date.now()}_${commentFile.name}`;
@@ -227,23 +273,70 @@ function TaskDetail({ task, members, boardColumns, projects, labels: allLabels, 
         }
       } catch {}
     }
-    await supabase.from('task_comments').insert({
+    const content = commentText || (fileData ? `📎 ${fileData.name}` : '');
+    const { data: savedComment } = await supabase.from('task_comments').insert({
       task_id: task.id, user_id: currentUser?.id,
-      content: newComment.trim() || (fileData ? `📎 ${fileData.name}` : ''),
+      content,
       ...(fileData ? { file_name: fileData.name, file_url: fileData.url, file_type: fileData.type } : {}),
-    });
-    setNewComment(''); setCommentFile(null); setSending(false); loadComments();
+    }).select('id,content').single();
+    const mentionedUsers = findMentionedUsers(content, members);
+    if (savedComment && mentionedUsers.length) {
+      await Promise.all(mentionedUsers.map(member => createCommentMentionNotification({
+        task,
+        commentId: savedComment.id,
+        mentionedUserId: member.id,
+        actorId: currentUser?.id,
+      })));
+    }
+    setNewComment(''); setMentionQuery(null); setCommentFile(null); setSending(false); loadComments();
   }
 
   async function saveCommentEdit(commentId) {
     if (!editingCommentText.trim()) return;
-    await supabase.from('task_comments').update({ content: editingCommentText.trim() }).eq('id', commentId);
+    const content = editingCommentText.trim();
+    const { data: savedComment } = await supabase.from('task_comments')
+      .update({ content })
+      .eq('id', commentId)
+      .select('id,content')
+      .single();
+    const mentionedUsers = findMentionedUsers(content, members);
+    if (savedComment && mentionedUsers.length) {
+      await Promise.all(mentionedUsers.map(member => createCommentMentionNotification({
+        task,
+        commentId: savedComment.id,
+        mentionedUserId: member.id,
+        actorId: currentUser?.id,
+      })));
+    }
     setEditingCommentId(null); setEditingCommentText(''); loadComments();
   }
 
   async function deleteComment(id) {
     await supabase.from('task_comments').delete().eq('id', id); loadComments();
   }
+
+  function updateCommentText(value) {
+    setNewComment(value);
+    setMentionQuery(activeMentionQuery(value));
+  }
+
+  function insertMention(member) {
+    const tag = mentionTagFor(member);
+    if (!tag) return;
+    setNewComment(prev => prev.replace(/(^|\s)@[\p{L}\p{N}._-]*$/u, `$1@${tag} `));
+    setMentionQuery(null);
+    setTimeout(() => commentRef.current?.focus(), 0);
+  }
+
+  const mentionSuggestions = mentionQuery === null ? [] : members
+    .filter(member => member.id !== currentUser?.id)
+    .filter(member => {
+      const tag = mentionTagFor(member).toLowerCase();
+      const name = (member.full_name || '').toLowerCase();
+      const email = (member.email || '').toLowerCase();
+      return !mentionQuery || tag.includes(mentionQuery) || name.includes(mentionQuery) || email.includes(mentionQuery);
+    })
+    .slice(0, 6);
 
   async function archiveTask() {
     await supabase.from('tasks').update({ is_archived: true, archived_at: new Date().toISOString() }).eq('id', task.id);
@@ -521,13 +614,7 @@ function TaskDetail({ task, members, boardColumns, projects, labels: allLabels, 
                         ) : (
                           <>
                             {c.content && (
-                        <p className="text-subhead whitespace-pre-wrap break-words">
-                          {c.content.split(' ').map((word, i) =>
-                            word.startsWith('http://') || word.startsWith('https://')
-                              ? <><a key={i} href={word} target="_blank" rel="noopener noreferrer" onClick={e=>e.stopPropagation()} className="text-ios-blue underline">{word}</a>{' '}</>
-                              : word + ' '
-                          )}
-                        </p>
+                              <p className="text-subhead whitespace-pre-wrap break-words">{renderCommentText(c.content)}</p>
                       )}
                             {c.file_url && (
                               <button onClick={e => { e.stopPropagation(); downloadFile(c.file_url, c.file_name); }}
@@ -552,16 +639,43 @@ function TaskDetail({ task, members, boardColumns, projects, labels: allLabels, 
                 <button onClick={() => setCommentFile(null)}><X className="w-3.5 h-3.5" /></button>
               </div>
             )}
+            {mentionSuggestions.length > 0 && (
+              <div className="ml-12 mb-1 max-w-sm rounded-ios bg-white border border-ios-separator/40 shadow-ios overflow-hidden">
+                {mentionSuggestions.map(member => (
+                  <button key={member.id} type="button" onMouseDown={e => { e.preventDefault(); insertMention(member); }}
+                    className="w-full flex items-center gap-2 px-3 py-2 hover:bg-blue-50 text-left transition-colors">
+                    {member.avatar_url ? (
+                      <img src={member.avatar_url} alt="" className="w-7 h-7 rounded-full object-cover shrink-0" />
+                    ) : (
+                      <span className="w-7 h-7 rounded-full bg-ios-blue text-white text-caption2 font-bold flex items-center justify-center shrink-0">
+                        {(member.full_name || member.email || '?')[0].toUpperCase()}
+                      </span>
+                    )}
+                    <span className="min-w-0">
+                      <span className="block text-footnote font-semibold text-ios-primary truncate">{member.full_name || member.email}</span>
+                      <span className="block text-caption2 text-ios-tertiary truncate">@{mentionTagFor(member)}</span>
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
             <div className="flex gap-2">
               <input ref={fileRef} type="file" className="hidden" onChange={e => setCommentFile(e.target.files?.[0] || null)} />
               <button onClick={() => fileRef.current?.click()} className="p-2 rounded-ios hover:bg-ios-fill text-ios-tertiary hover:text-ios-blue" title="Attach file">
                 <Paperclip className="w-4 h-4" />
               </button>
-              <textarea className="input flex-1 resize-none" rows={1} placeholder="Add comment... (Enter to send)"
-                value={newComment} onChange={e => setNewComment(e.target.value)}
+              <textarea ref={commentRef} className="input flex-1 resize-none" rows={1} placeholder="Add comment... use @name to tag"
+                value={newComment} onChange={e => updateCommentText(e.target.value)}
                 style={{minHeight:'38px', maxHeight:'120px', overflowY:'auto'}}
                 onInput={e => { e.target.style.height='auto'; e.target.style.height=e.target.scrollHeight+'px'; }}
-                onKeyDown={e => { if (e.key==='Enter' && !e.shiftKey) { e.preventDefault(); addComment(); }}} />
+                onKeyDown={e => {
+                  if (e.key === 'Escape') setMentionQuery(null);
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    if (mentionSuggestions.length > 0) insertMention(mentionSuggestions[0]);
+                    else addComment();
+                  }
+                }} />
               <button onClick={addComment} disabled={(!newComment.trim() && !commentFile) || sending} className="btn-primary px-3">
                 {sending ? <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : <Send className="w-4 h-4" />}
               </button>
@@ -666,6 +780,7 @@ export default function TasksPage() {
   const updateMode = m => { setMode(m); try { localStorage.setItem(VIEW_KEY, m); } catch {} };
 
   const [projects, setProjects] = useState([]);
+  const [access, setAccess] = useState(null);
   const [boardColumns, setBoardColumns] = useState([]);
   const [tasks, setTasks] = useState([]);
   const [archivedTasks, setArchivedTasks] = useState([]);
@@ -686,6 +801,7 @@ export default function TasksPage() {
   const [filterLabel, setFilterLabel] = useState('');
   const [filterPriority, setFilterPriority] = useState('');
   const [search, setSearch] = useState('');
+  const [archiveSearch, setArchiveSearch] = useState('');
   const [collapsed, setCollapsed] = useState({});
   const [expandedArchived, setExpandedArchived] = useState({});
   const [archivedVisibleCounts, setArchivedVisibleCounts] = useState({});
@@ -695,6 +811,8 @@ export default function TasksPage() {
   const [dragOverCol, setDragOverCol] = useState(null);
   const [dragTaskId, setDragTaskId] = useState(null);
   const [dragOverTaskId, setDragOverTaskId] = useState(null);
+  const [dragOverPosition, setDragOverPosition] = useState('after');
+  const [dragTopColId, setDragTopColId] = useState(null);
   const [taskModal, setTaskModal] = useState(null);
   const [newColModal, setNewColModal] = useState(false);
   const [newColName, setNewColName] = useState('');
@@ -704,7 +822,7 @@ export default function TasksPage() {
   const [showMemberDrop, setShowMemberDrop] = useState(false);
   const memberRef = useRef(null);
 
-  const { activeTimer, elapsed, isPaused, startTimer, stopTimer, pauseTimer } = useTimer();
+  const { activeTimer, elapsed, isPaused, startTimer, stopTimer, pauseTimer, loadTimer } = useTimer();
   const { isManager, role, profile: userProfile } = useRole();
 
   useEffect(() => {
@@ -730,12 +848,22 @@ export default function TasksPage() {
   }, []);
 
   async function loadAll(targetUserId) {
-    const { data: { user: me } } = await supabase.auth.getUser();
-    const myUid = me?.id;
+    const accessInfo = await getProjectAccess();
+    setAccess(accessInfo);
+    const myUid = accessInfo.user?.id;
     const targetUid = targetUserId || myUid;
 
+    let projectQuery = supabase.from('projects').select('*, clients(id,name)').eq('status','active').order('name');
+    if (accessInfo.isRestricted) {
+      if (accessInfo.projectIds.length === 0) {
+        setProjects([]);
+      } else {
+        projectQuery = projectQuery.in('id', accessInfo.projectIds);
+      }
+    }
+
     const [{ data: proj }, { data: mem }, { data: lbl }] = await Promise.all([
-      supabase.from('projects').select('*, clients(id,name)').eq('status','active').order('name'),
+      accessInfo.isRestricted && accessInfo.projectIds.length === 0 ? Promise.resolve({ data: [] }) : projectQuery,
       supabase.from('profiles').select('id,full_name,email,role,avatar_url').order('full_name'),
       supabase.from('labels').select('*').order('name'),
     ]);
@@ -765,14 +893,27 @@ export default function TasksPage() {
   }
 
   async function loadTasks() {
-    const { data: { user: currentUser2 } } = await supabase.auth.getUser();
-    const currentUid = currentUser2?.id;
-    const { data: currentProfile } = await supabase.from('profiles').select('role').eq('id', currentUid || '').single();
-    const myRole = currentProfile?.role || 'operator';
+    const accessInfo = await getProjectAccess();
+    setAccess(accessInfo);
+    const currentUid = accessInfo.user?.id;
+    const myRole = accessInfo.role || 'operator';
+
+    if (accessInfo.isRestricted && accessInfo.projectIds.length === 0) {
+      setTasks([]);
+      setArchivedTasks([]);
+      setTaskLabels({});
+      setTasksLoaded(true);
+      return;
+    }
 
     // Get role hierarchy for filtering
     let activeQ = supabase.from('tasks').select('*, profiles!tasks_assigned_to_fkey(id,full_name,email,role,avatar_url), projects(id,name,color,client_id,clients(id,name))').or('is_archived.eq.false,is_archived.is.null').order('position');
     let archivedQ = supabase.from('tasks').select('*, profiles!tasks_assigned_to_fkey(id,full_name,email,role,avatar_url), projects(id,name,color,client_id,clients(id,name))').eq('is_archived',true).order('archived_at',{ascending:false}).limit(100);
+
+    if (accessInfo.isRestricted) {
+      activeQ = activeQ.in('project_id', accessInfo.projectIds);
+      archivedQ = archivedQ.in('project_id', accessInfo.projectIds);
+    }
 
     // Operator: only own tasks
     if (myRole === 'operator') {
@@ -820,7 +961,7 @@ export default function TasksPage() {
     await loadTasks();
   }
 
-  async function moveTaskToPosition(srcId, targetColId, beforeTaskId = null) {
+  function moveTaskToPosition(srcId, targetColId, beforeTaskId = null) {
     const srcTask = tasks.find(t => t.id === srcId);
     if (!srcTask || !targetColId) return;
 
@@ -830,18 +971,23 @@ export default function TasksPage() {
       .filter(t => t.id !== srcId && (t.column_id === targetColId || (isFirstCol && (!t.column_id || !knownColIds.has(t.column_id)))))
       .sort((a, b) => (a.position ?? 9999) - (b.position ?? 9999));
     const foundIndex = beforeTaskId ? targetItems.findIndex(t => t.id === beforeTaskId) : -1;
-    const insertAt = beforeTaskId && foundIndex >= 0 ? foundIndex : targetItems.length;
+    const insertAt = beforeTaskId === '__top__' ? 0 : beforeTaskId && foundIndex >= 0 ? foundIndex : targetItems.length;
     const reordered = [...targetItems];
-    reordered.splice(insertAt === -1 ? targetItems.length : insertAt, 0, { ...srcTask, column_id: targetColId });
+    reordered.splice(insertAt, 0, { ...srcTask, column_id: targetColId });
 
-    setTasks(prev => prev.map(t => {
-      const next = reordered.find(r => r.id === t.id);
-      return next ? { ...t, column_id: targetColId, position: reordered.findIndex(r => r.id === t.id) } : t;
+    flushSync(() => setTasks(prev => {
+      const reorderedMap = new Map(reordered.map((t, i) => [t.id, { ...t, column_id: targetColId, position: i }]));
+      return prev.map(t => reorderedMap.get(t.id) || t);
     }));
 
-    await Promise.all(reordered.map((t, i) =>
-      supabase.from('tasks').update({ column_id: targetColId, position: i }).eq('id', t.id)
-    ));
+    setTimeout(() => {
+      Promise.all(reordered.map((t, i) =>
+        supabase.from('tasks').update({ column_id: targetColId, position: i }).eq('id', t.id)
+      )).catch(err => {
+        console.error('Failed to save task order', err);
+        loadTasks();
+      });
+    }, 120);
   }
 
   async function addColumn() {
@@ -941,29 +1087,28 @@ export default function TasksPage() {
   if (filterPriority) visibleArchived = visibleArchived.filter(t => t.priority===filterPriority);
   if (filterLabel) visibleArchived = visibleArchived.filter(t => (taskLabels[t.id]||[]).some(l => l.id===filterLabel));
   if (search) visibleArchived = visibleArchived.filter(t => t.title?.toLowerCase().includes(search.toLowerCase()));
+  if (archiveSearch) {
+    const q = archiveSearch.toLowerCase();
+    visibleArchived = visibleArchived.filter(t =>
+      t.title?.toLowerCase().includes(q) ||
+      t.description?.toLowerCase().includes(q) ||
+      t.projects?.name?.toLowerCase().includes(q) ||
+      t.projects?.clients?.name?.toLowerCase().includes(q)
+    );
+  }
   const hasFilters = mainFilter!=='all'||filterProject||filterPriority||filterLabel||search||urlClientId;
 
   return (
     <div className="space-y-4">
       {/* Header */}
-      <div className={`flex flex-col gap-3 lg:items-center ${mode === 'board' ? 'lg:items-start' : 'lg:flex-row lg:justify-between'}`}>
-        <div>
+      <div className="flex flex-col gap-3">
+        <div className="flex items-start justify-between gap-3 flex-wrap">
+          <div>
           <h1 className="text-title2 font-bold text-ios-primary">{mode==='archive' ? 'Archive' : 'Tasks'}</h1>
           <p className="text-subhead text-ios-secondary">{mode==='archive' ? `${archivedTasks.length} archived` : hasFilters ? `${visible.length} of ${tasks.length}` : `${tasks.length} tasks`}</p>
-        </div>
-        <div className="flex items-center gap-2 shrink-0 flex-wrap justify-start">
-          {/* View toggle */}
-          <div className="flex bg-ios-fill rounded-ios p-0.5 gap-0.5">
-            <button onClick={() => updateMode('list')} className={`p-2 rounded-ios-sm transition-all ${mode==='list' ? 'bg-white shadow-ios-sm' : ''}`} title="List">
-              <LayoutList className="w-4 h-4 text-ios-secondary" />
-            </button>
-            <button onClick={() => updateMode('board')} className={`p-2 rounded-ios-sm transition-all ${mode==='board' ? 'bg-white shadow-ios-sm' : ''}`} title="Board">
-              <Kanban className="w-4 h-4 text-ios-secondary" />
-            </button>
-            <button onClick={() => updateMode('archive')} className={`p-2 rounded-ios-sm transition-all ${mode==='archive' ? 'bg-white shadow-ios-sm' : ''}`} title="Archive">
-              <Archive className="w-4 h-4 text-ios-secondary" />
-            </button>
           </div>
+        </div>
+        <div className="flex items-center gap-2 shrink-0 flex-wrap justify-start max-w-full">
           {/* Back or New Task */}
           {mode === 'archive' ? (
             <button onClick={() => updateMode('list')} className="btn-secondary flex items-center gap-1.5 text-footnote">
@@ -980,31 +1125,41 @@ export default function TasksPage() {
               <Plus className="w-3.5 h-3.5" /> Column
             </button>
           )}
+          {/* View toggle */}
+          <div className="flex bg-ios-fill rounded-ios p-0.5 gap-0.5">
+            <button onClick={() => updateMode('list')} className={`p-2 rounded-ios-sm transition-all ${mode==='list' ? 'bg-white shadow-ios-sm' : ''}`} title="List">
+              <LayoutList className="w-4 h-4 text-ios-secondary" />
+            </button>
+            <button onClick={() => updateMode('board')} className={`p-2 rounded-ios-sm transition-all ${mode==='board' ? 'bg-white shadow-ios-sm' : ''}`} title="Board">
+              <Kanban className="w-4 h-4 text-ios-secondary" />
+            </button>
+            <button onClick={() => updateMode('archive')} className={`p-2 rounded-ios-sm transition-all ${mode==='archive' ? 'bg-white shadow-ios-sm' : ''}`} title="Archive">
+              <Archive className="w-4 h-4 text-ios-secondary" />
+            </button>
+          </div>
+          {mode === 'board' && (role === 'admin' || role === 'manager') && allMembers.length > 1 && (
+            <div className="flex items-center gap-2 overflow-x-auto pb-1 max-w-full">
+              {[{ id: currentUser?.id, label: 'My Board' }, ...allMembers
+                .filter(m => m.id !== currentUser?.id && (role === 'admin' || m.role !== 'admin'))
+                .map(m => ({ id: m.id, label: m.full_name?.split(' ')[0] || m.email }))
+              ].map(item => {
+                const effectiveViewing = viewingUserId || currentUser?.id;
+                const active = effectiveViewing === item.id;
+                return (
+                  <button key={item.id} onClick={async () => {
+                      const newVid = item.id === currentUser?.id ? null : item.id; setViewingUserId(newVid); viewingUserIdRef.current = newVid;
+                      await loadColumnsForUser(item.id, currentUser?.id);
+                      await loadTasks();
+                    }}
+                    className={`px-3.5 py-1.5 rounded-full text-footnote font-semibold whitespace-nowrap transition-all ${active ? 'bg-ios-blue text-white shadow-ios-sm' : 'bg-ios-fill text-ios-secondary hover:bg-ios-fill2'}`}>
+                    {item.label}
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </div>
       </div>
-
-      {/* Board mode: person switcher — admin only */}
-      {mode === 'board' && (role === 'admin' || role === 'manager') && allMembers.length > 1 && (
-        <div className="flex items-center gap-2 overflow-x-auto pb-1 -mt-1">
-          {[{ id: currentUser?.id, label: 'My Board' }, ...allMembers
-            .filter(m => m.id !== currentUser?.id && (role === 'admin' || m.role !== 'admin'))
-            .map(m => ({ id: m.id, label: m.full_name?.split(' ')[0] || m.email }))
-          ].map(item => {
-            const effectiveViewing = viewingUserId || currentUser?.id;
-            const active = effectiveViewing === item.id;
-            return (
-              <button key={item.id} onClick={async () => {
-                  const newVid = item.id === currentUser?.id ? null : item.id; setViewingUserId(newVid); viewingUserIdRef.current = newVid;
-                  await loadColumnsForUser(item.id, currentUser?.id);
-                  await loadTasks();
-                }}
-                className={`px-3.5 py-1.5 rounded-full text-footnote font-semibold whitespace-nowrap transition-all ${active ? 'bg-ios-blue text-white shadow-ios-sm' : 'bg-ios-fill text-ios-secondary hover:bg-ios-fill2'}`}>
-                {item.label}
-              </button>
-            );
-          })}
-        </div>
-      )}
 
       {/* Filters */}
       {mode !== 'archive' && (
@@ -1176,12 +1331,20 @@ export default function TasksPage() {
             const orphanTasks = isFirstCol
               ? boardTasks.filter(t => !t.column_id || !knownColIds.has(t.column_id))
               : [];
-            const colTasks = [...boardTasks.filter(t => t.column_id === col.id), ...orphanTasks];
+            const colTasks = [...boardTasks.filter(t => t.column_id === col.id), ...orphanTasks]
+              .sort((a, b) => (a.position ?? 9999) - (b.position ?? 9999));
             const isDragTarget = dragOver===col.id;
             return (
               <div key={col.id}
                 className={`shrink-0 w-72 rounded-ios-lg p-3 transition-all flex flex-col min-h-0 ${isDragTarget ? 'bg-blue-50 ring-2 ring-ios-blue' : dragOverCol === col.id && dragCol !== col.id ? 'ring-2 ring-ios-orange ring-dashed' : 'bg-ios-bg'}`}
-                onDragOver={e => { e.preventDefault(); if (dragCol) setDragOverCol(col.id); else setDragOver(col.id); }}
+                onDragOver={e => {
+                  e.preventDefault();
+                  if (dragCol) {
+                    if (dragOverCol !== col.id) setDragOverCol(col.id);
+                  } else if (dragOver !== col.id) {
+                    setDragOver(col.id);
+                  }
+                }}
                 onDragLeave={() => { setDragOver(null); setDragOverCol(null); }}
                 onDrop={e => { if (dragCol) { reorderColumns(dragCol, col.id); setDragCol(null); setDragOverCol(null); } else { moveTaskToPosition(e.dataTransfer.getData('taskId'), col.id); setDragOver(null); } }}>
                 <ColHeader col={col}
@@ -1191,6 +1354,26 @@ export default function TasksPage() {
                   onDragStart={() => setDragCol(col.id)}
                   onDragEnd={() => { setDragCol(null); setDragOverCol(null); }} />
                 <div className="space-y-2 flex-1 overflow-y-auto pr-1 min-h-0">
+                  {colTasks.length > 0 && (
+                    <div className={`rounded-ios border-2 border-dashed flex items-center justify-center transition-all ${dragTopColId === col.id ? 'h-10 border-ios-blue bg-blue-50 text-ios-blue' : dragTaskId ? 'h-8 border-ios-blue/30 bg-blue-50/40 text-ios-blue/70' : 'h-4 border-transparent text-transparent'}`}
+                      onDragEnter={e => { e.preventDefault(); if (!dragCol && dragTopColId !== col.id) setDragTopColId(col.id); }}
+                      onDragOver={e => {
+                        e.preventDefault();
+                        if (!dragCol) {
+                          if (dragTopColId !== col.id) setDragTopColId(col.id);
+                          if (dragOver !== col.id) setDragOver(col.id);
+                        }
+                      }}
+                      onDragLeave={() => setDragTopColId(null)}
+                      onDrop={async e => {
+                        e.preventDefault(); e.stopPropagation();
+                        const srcId = e.dataTransfer.getData('taskId');
+                        if (srcId) moveTaskToPosition(srcId, col.id, '__top__');
+                        setDragTopColId(null); setDragOver(null); setDragTaskId(null); setDragOverTaskId(null);
+                      }}>
+                      <span className="text-caption2 font-semibold">Drop as first</span>
+                    </div>
+                  )}
                   {colTasks.map(task => {
                     const pri = PRIORITY[task.priority];
                     const assignee = members.find(m => m.id===task.assigned_to);
@@ -1200,8 +1383,14 @@ export default function TasksPage() {
                     return (
                       <div key={task.id} draggable
                         onDragStart={e => { e.dataTransfer.setData('taskId', task.id); setDragTaskId(task.id); }}
-                        onDragEnd={() => { setDragOver(null); setDragTaskId(null); setDragOverTaskId(null); }}
-                        onDragOver={e => { e.preventDefault(); setDragOverTaskId(task.id); }}
+                        onDragEnd={() => { setDragOver(null); setDragTaskId(null); setDragOverTaskId(null); setDragOverPosition('after'); setDragTopColId(null); }}
+                        onDragOver={e => {
+                          e.preventDefault();
+                          const rect = e.currentTarget.getBoundingClientRect();
+                          const nextPosition = e.clientY > rect.top + rect.height / 2 ? 'after' : 'before';
+                          if (dragOverTaskId !== task.id) setDragOverTaskId(task.id);
+                          if (dragOverPosition !== nextPosition) setDragOverPosition(nextPosition);
+                        }}
                         onDrop={async e => {
                           e.preventDefault(); e.stopPropagation();
                           const srcId = e.dataTransfer.getData('taskId');
@@ -1213,11 +1402,15 @@ export default function TasksPage() {
                             .sort((a, b) => (a.position ?? 9999) - (b.position ?? 9999));
                           const targetIndex = ordered.findIndex(t => t.id === task.id);
                           const beforeTaskId = dropAfter ? ordered[targetIndex + 1]?.id || null : task.id;
-                          await moveTaskToPosition(srcId, col.id, beforeTaskId);
-                          setDragOver(null); setDragOverTaskId(null); setDragTaskId(null);
+                          moveTaskToPosition(srcId, col.id, beforeTaskId);
+                          setDragOver(null); setDragOverTaskId(null); setDragTaskId(null); setDragOverPosition('after'); setDragTopColId(null);
                         }}
                         onClick={() => setTaskModal(task)}
-                        className={`bg-white rounded-ios border p-2.5 cursor-pointer hover:shadow-ios transition-all select-none group ${dragOverTaskId === task.id && dragTaskId !== task.id ? 'border-ios-blue border-2' : ''} ${isDone ? 'opacity-50' : isTimerActive ? 'border-ios-blue bg-blue-50/30' : 'border-ios-separator/50'}`}>
+                        className={`relative bg-white rounded-ios border p-2.5 cursor-pointer hover:shadow-ios transition-all select-none group ${dragOverTaskId === task.id && dragTaskId !== task.id ? 'border-ios-blue shadow-ios-lg scale-[1.01]' : ''} ${isDone ? 'opacity-50' : isTimerActive ? 'border-ios-blue bg-blue-50/30' : 'border-ios-separator/50'}`}>
+
+                        {dragOverTaskId === task.id && dragTaskId !== task.id && (
+                          <div className={`absolute left-2 right-2 h-1 rounded-full bg-ios-blue shadow-ios ${dragOverPosition === 'before' ? '-top-1.5' : '-bottom-1.5'}`} />
+                        )}
 
                         {/* Row 1: labels + archive */}
                         {labels.length > 0 && (
@@ -1290,13 +1483,13 @@ export default function TasksPage() {
                     );
                   })}
                   <div className={`rounded-ios border-2 border-dashed flex flex-col items-center justify-center gap-1 transition-all ${isDragTarget ? 'border-ios-blue bg-blue-50 h-20' : colTasks.length === 0 ? 'h-20 border-ios-separator/50 opacity-50' : 'h-3 border-transparent'}`}
-                    onDragOver={e => { e.preventDefault(); setDragOver(col.id); }}
+                    onDragOver={e => { e.preventDefault(); if (dragOver !== col.id) setDragOver(col.id); }}
                     onDrop={async e => {
                       e.preventDefault();
                       const srcId = e.dataTransfer.getData('taskId');
                       if (srcId) {
-                        await moveTaskToPosition(srcId, col.id);
-                        setDragOver(null); setDragTaskId(null);
+                        moveTaskToPosition(srcId, col.id);
+                        setDragOver(null); setDragTaskId(null); setDragTopColId(null);
                       }
                     }}>
                     {(isDragTarget || colTasks.length === 0) && (
@@ -1327,12 +1520,17 @@ export default function TasksPage() {
 
       {/* ARCHIVE */}
       {tasksLoaded && mode === 'archive' && (
-        <div className="card overflow-hidden">
-          {archivedTasks.length === 0 ? (
-            <div className="p-12 text-center"><Archive className="w-8 h-8 text-ios-label4 mx-auto mb-3"/><p className="text-subhead text-ios-secondary">No archived tasks</p></div>
-          ) : (
-            <>
-              {archivedTasks.slice(0, archivePageCount).map(task => {
+        <div className="space-y-3">
+          <div className="relative">
+            <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-ios-tertiary" />
+            <input className="input pl-10" placeholder="Search archived tasks..." value={archiveSearch} onChange={e => setArchiveSearch(e.target.value)} />
+          </div>
+          <div className="card overflow-hidden">
+            {visibleArchived.length === 0 ? (
+              <div className="p-12 text-center"><Archive className="w-8 h-8 text-ios-label4 mx-auto mb-3"/><p className="text-subhead text-ios-secondary">{archiveSearch ? 'No archived tasks found' : 'No archived tasks'}</p></div>
+            ) : (
+              <>
+                {visibleArchived.slice(0, archivePageCount).map(task => {
             const assignee = members.find(m => m.id===task.assigned_to);
             return (
               <div key={task.id} onClick={() => setTaskModal(task)}
@@ -1350,14 +1548,15 @@ export default function TasksPage() {
               </div>
             );
               })}
-              {archivePageCount < archivedTasks.length && (
+              {archivePageCount < visibleArchived.length && (
                 <button onClick={() => setArchivePageCount(c => c + ARCHIVED_PAGE_SIZE)}
                   className="w-full px-4 py-3 text-footnote font-semibold text-ios-blue hover:bg-blue-50 border-t border-ios-separator/20">
                   Show 10 more archived tasks
                 </button>
               )}
-            </>
-          )}
+              </>
+            )}
+          </div>
         </div>
       )}
 

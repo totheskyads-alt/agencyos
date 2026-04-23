@@ -73,6 +73,11 @@ export default function InvoicePrintPage({ params }) {
   const currency = invoice.invoice_currency || 'EUR';
   const rate = currency === 'EUR' ? 1 : (Number(invoice.exchange_rate) || 1);
   const amountEur = roundMoney(invoice.amount);
+  const subtotalEur = roundMoney(invoice.subtotal_amount ?? (invoice.tax_rate ? amountEur / (1 + (Number(invoice.tax_rate) || 0) / 100) : amountEur));
+  const taxRate = Number(invoice.tax_rate || 0);
+  const taxAmountEur = roundMoney(invoice.tax_amount_eur ?? subtotalEur * taxRate / 100);
+  const subtotalDisplay = roundMoney(subtotalEur * rate);
+  const taxAmountDisplay = roundMoney(invoice.tax_amount_display ?? taxAmountEur * rate);
   const displayAmount = roundMoney(invoice.display_amount ?? amountEur * rate);
   const monthLabel = `${MONTHS_FULL[(invoice.month || 1) - 1]} ${invoice.year || new Date().getFullYear()}`;
   const itemDescription = invoice.invoice_description?.trim()
@@ -112,11 +117,6 @@ export default function InvoicePrintPage({ params }) {
             <div className="text-right">
               <p className="text-footnote uppercase tracking-wide text-ios-secondary">Balance Due</p>
               <p className="text-title1 font-bold mt-1">{fmtMoney(displayAmount, currency)}</p>
-              {currency !== 'EUR' && (
-                <p className="text-footnote text-ios-tertiary mt-1">
-                  Internal value: {fmtMoney(amountEur, 'EUR')} at 1 EUR = {rate} {currency}
-                </p>
-              )}
             </div>
           </header>
 
@@ -177,11 +177,11 @@ export default function InvoicePrintPage({ params }) {
             <div className="w-full max-w-xs space-y-3">
               <div className="flex justify-between text-subhead">
                 <span className="text-ios-secondary">Sub Total</span>
-                <span>{fmtMoney(displayAmount, currency)}</span>
+                <span>{fmtMoney(subtotalDisplay, currency)}</span>
               </div>
               <div className="flex justify-between text-subhead">
                 <span className="text-ios-secondary">Tax</span>
-                <span>{Number(invoice.tax_rate || 0).toFixed(2)}%</span>
+                <span>{taxRate.toFixed(2)}% · {fmtMoney(taxAmountDisplay, currency)}</span>
               </div>
               <div className="border-t border-ios-separator pt-3 flex justify-between text-title3 font-bold">
                 <span>Total</span>
@@ -194,14 +194,18 @@ export default function InvoicePrintPage({ params }) {
             </div>
           </div>
 
-          <footer className="mt-12 pt-6 border-t border-ios-separator">
-            <p className="text-footnote uppercase tracking-wide text-ios-secondary mb-2">Notes</p>
-            {invoice.notes ? (
+          {invoice.notes && (
+            <footer className="mt-12 pt-6 border-t border-ios-separator">
+              <p className="text-footnote uppercase tracking-wide text-ios-secondary mb-2">Notes</p>
               <p className="text-subhead text-ios-secondary">{invoice.notes}</p>
-            ) : (
-              <p className="text-subhead text-ios-tertiary">No notes.</p>
-            )}
-          </footer>
+            </footer>
+          )}
+
+          {currency !== 'EUR' && (
+            <p className="mt-8 text-footnote text-ios-tertiary">
+              Exchange rate set on this invoice: 1 EUR = {rate} {currency}
+            </p>
+          )}
         </section>
       </main>
 

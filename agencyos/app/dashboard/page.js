@@ -2,6 +2,8 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { fmtDuration } from '@/lib/utils';
+import { getProjectAccess, visibleClientIdsFromProjects } from '@/lib/projectAccess';
+import { ensureBillingReminderNotifications } from '@/lib/notifications';
 import Link from 'next/link';
 import { ArrowRight, Clock } from 'lucide-react';
 
@@ -70,27 +72,58 @@ export default function DashboardPage() {
     if (!user) return;
     const { data: p } = await supabase.from('profiles').select('*').eq('id', user.id).single();
     setProfile(p);
+    if (p?.role === 'admin') await ensureBillingReminderNotifications(user.id);
+    const accessInfo = await getProjectAccess();
 
     const now = new Date();
     const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
     const weekStart = new Date(now.getTime() - 6 * 86400000).toISOString();
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
 
-    const [{ data: todayEnt }, { data: weekEntFull }, { data: monthEnt }, { data: cli }, { data: proj }, { data: tasks }, { data: recent }] = await Promise.all([
-      supabase.from('time_entries').select('duration_seconds,project_id,projects(name,color)').eq('user_id',user.id).not('end_time','is',null).gte('created_at',todayStart),
-      supabase.from('time_entries').select('duration_seconds,project_id,projects(name,color)').eq('user_id',user.id).not('end_time','is',null).gte('created_at',weekStart),
-      supabase.from('time_entries').select('duration_seconds').eq('user_id',user.id).not('end_time','is',null).gte('created_at',monthStart),
-      supabase.from('clients').select('id'),
-      supabase.from('projects').select('id').eq('status','active'),
-      supabase.from('tasks').select('id,assigned_to,project_id').or('is_archived.eq.false,is_archived.is.null').not('project_id','is',null),
-      supabase.from('time_entries').select('duration_seconds,description,projects(name,color,clients(name))').eq('user_id',user.id).not('end_time','is',null).order('created_at',{ascending:false}).limit(5),
+    let visibleProjectIds = accessInfo.projectIds;
+    let visibleClientIds = null;
+    if (accessInfo.isRestricted && visibleProjectIds.length === 0) {
+      setTodaySecs(0); setWeekSecs(0); setMonthSecs(0);
+      setClientCount(0); setProjectCount(0); setOpenTasks(0);
+      setRecentEntries([]); setTodayByProject([]); setTodayTotal(0); setWeekByProject([]);
+      return;
+    }
+
+    let projectQuery = supabase.from('projects').select('id,client_id').eq('status','active');
+    if (accessInfo.isRestricted) projectQuery = projectQuery.in('id', visibleProjectIds);
+    const { data: visibleProjects } = await projectQuery;
+    if (accessInfo.isRestricted) visibleClientIds = visibleClientIdsFromProjects(visibleProjects || []);
+
+    let todayQ = supabase.from('time_entries').select('duration_seconds,project_id,projects(name,color)').eq('user_id',user.id).not('end_time','is',null).gte('created_at',todayStart);
+    let weekQ = supabase.from('time_entries').select('duration_seconds,project_id,projects(name,color)').eq('user_id',user.id).not('end_time','is',null).gte('created_at',weekStart);
+    let monthQ = supabase.from('time_entries').select('duration_seconds').eq('user_id',user.id).not('end_time','is',null).gte('created_at',monthStart);
+    let clientQ = supabase.from('clients').select('id');
+    let tasksQ = supabase.from('tasks').select('id,assigned_to,project_id').or('is_archived.eq.false,is_archived.is.null').not('project_id','is',null);
+    let recentQ = supabase.from('time_entries').select('duration_seconds,description,projects(name,color,clients(name))').eq('user_id',user.id).not('end_time','is',null).order('created_at',{ascending:false}).limit(5);
+
+    if (accessInfo.isRestricted) {
+      todayQ = todayQ.in('project_id', visibleProjectIds);
+      weekQ = weekQ.in('project_id', visibleProjectIds);
+      monthQ = monthQ.in('project_id', visibleProjectIds);
+      tasksQ = tasksQ.in('project_id', visibleProjectIds);
+      recentQ = recentQ.in('project_id', visibleProjectIds);
+      clientQ = visibleClientIds.length ? clientQ.in('id', visibleClientIds) : null;
+    }
+
+    const [{ data: todayEnt }, { data: weekEntFull }, { data: monthEnt }, { data: cli }, { data: tasks }, { data: recent }] = await Promise.all([
+      todayQ,
+      weekQ,
+      monthQ,
+      clientQ || Promise.resolve({ data: [] }),
+      tasksQ,
+      recentQ,
     ]);
 
     const today = (todayEnt||[]).reduce((a,e)=>a+(e.duration_seconds||0),0);
     setTodaySecs(today);
     setWeekSecs((weekEntFull||[]).reduce((a,e)=>a+(e.duration_seconds||0),0));
     setMonthSecs((monthEnt||[]).reduce((a,e)=>a+(e.duration_seconds||0),0));
-    setClientCount(cli?.length||0); setProjectCount(proj?.length||0);
+    setClientCount(cli?.length||0); setProjectCount(visibleProjects?.length||0);
     // Count tasks visible to this user (same logic as tasks page)
     const { data: myProfile } = await supabase.from('profiles').select('role').eq('id', user.id).single();
     let taskCount = tasks?.length || 0;

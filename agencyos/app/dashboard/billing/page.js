@@ -78,7 +78,7 @@ function fmtInvoiceCurrency(amount, currency = 'EUR') {
 }
 
 function normalizeInvoiceForm(b = {}) {
-  const amountEur = b.amount ?? '';
+  const amountEur = b.subtotal_amount ?? (b.tax_rate ? roundMoney((b.amount || 0) / (1 + (Number(b.tax_rate) || 0) / 100)) : b.amount ?? '');
   const currency = b.invoice_currency || 'EUR';
   const rate = b.exchange_rate || CURRENCIES[currency]?.defaultRate || 1;
   return {
@@ -131,6 +131,7 @@ export default function BillingPage() {
   const [bills, setBills] = useState([]);
   const [expenses, setExpenses] = useState([]);
   const [clients, setClients] = useState([]);
+  const [clientQuery, setClientQuery] = useState('');
   const [search, setSearch] = useState('');
   const [filterType, setFilterType] = useState('');
   const [range, setRange] = useState('30days');
@@ -148,7 +149,7 @@ export default function BillingPage() {
 
   async function load() {
     const [{ data: b }, { data: c }, { data: e }] = await Promise.all([
-      supabase.from('billing').select('*, clients(name,company,client_type)').order('year',{ascending:false}).order('month',{ascending:false}),
+      supabase.from('billing').select('*, clients(name,company,email,phone,client_type)').order('year',{ascending:false}).order('month',{ascending:false}),
       supabase.from('clients').select('id,name,company,client_type').order('name'),
       supabase.from('expenses').select('*').order('year',{ascending:false}).order('month',{ascending:false}).limit(200),
     ]);
@@ -218,15 +219,22 @@ export default function BillingPage() {
 
   async function saveInvoice() {
     setLoading(true);
-    const amountEur = roundMoney(parseFloat(invForm.amount) || 0);
+    const subtotalEur = roundMoney(parseFloat(invForm.amount) || 0);
+    const taxRate = Math.max(0, parseFloat(invForm.tax_rate) || 0);
+    const taxAmountEur = roundMoney(subtotalEur * taxRate / 100);
+    const amountEur = roundMoney(subtotalEur + taxAmountEur);
     const exchangeRate = invForm.invoice_currency === 'EUR' ? 1 : (parseFloat(invForm.exchange_rate) || CURRENCIES[invForm.invoice_currency]?.defaultRate || 1);
     const displayAmount = roundMoney(amountEur * exchangeRate);
+    const taxAmountDisplay = roundMoney(taxAmountEur * exchangeRate);
     const payload = {
       ...invForm,
       amount: amountEur,
+      subtotal_amount: subtotalEur,
       display_amount: displayAmount,
       exchange_rate: exchangeRate,
-      tax_rate: parseFloat(invForm.tax_rate) || 0,
+      tax_rate: taxRate,
+      tax_amount_eur: taxAmountEur,
+      tax_amount_display: taxAmountDisplay,
       month: parseInt(invForm.month),
       year: parseInt(invForm.year),
       client_id: invForm.client_id||null,
@@ -297,19 +305,23 @@ export default function BillingPage() {
     const latest = latestInvoiceAnyClient();
     setInvForm({
       ...emptyInv,
+      client_id: '',
       invoice_number: generateNextInvoiceNumber(bills),
       issue_date: todayIso(),
       due_date: addDaysIso(8),
       issuer_details: latest?.issuer_details || '',
       notes: latest?.notes || '',
     });
+    setClientQuery('');
     setSelectedInv(null);
     setInvModal(true);
   }
 
   function applyClientBillingData(clientId) {
+    const client = clients.find(c => c.id === clientId);
     const lastForClient = latestInvoiceForClient(clientId);
     const lastAny = latestInvoiceAnyClient();
+    setClientQuery(client?.name || '');
     setInvForm(prev => ({
       ...prev,
       client_id: clientId,
@@ -325,6 +337,7 @@ export default function BillingPage() {
 
   function openEditInv(b) {
     setInvForm(normalizeInvoiceForm(b));
+    setClientQuery(b.clients?.name || clients.find(c => c.id === b.client_id)?.name || '');
     setSelectedInv(b); setInvModal(true);
   }
 
@@ -334,11 +347,21 @@ export default function BillingPage() {
   }
 
   const years = Array.from({length:3},(_,i)=>new Date().getFullYear()-i);
-  const invoicePreviewEur = roundMoney(parseFloat(invForm.amount) || 0);
+  const invoicePreviewSubtotal = roundMoney(parseFloat(invForm.amount) || 0);
+  const invoicePreviewTaxRate = Math.max(0, parseFloat(invForm.tax_rate) || 0);
+  const invoicePreviewTax = roundMoney(invoicePreviewSubtotal * invoicePreviewTaxRate / 100);
+  const invoicePreviewEur = roundMoney(invoicePreviewSubtotal + invoicePreviewTax);
   const invoicePreviewRate = invForm.invoice_currency === 'EUR'
     ? 1
     : (parseFloat(invForm.exchange_rate) || CURRENCIES[invForm.invoice_currency]?.defaultRate || 1);
   const invoicePreviewDisplay = roundMoney(invoicePreviewEur * invoicePreviewRate);
+  const invoicePreviewTaxDisplay = roundMoney(invoicePreviewTax * invoicePreviewRate);
+  const matchingClients = clients.filter(c =>
+    !clientQuery.trim()
+      || c.name?.toLowerCase().includes(clientQuery.toLowerCase())
+      || c.company?.toLowerCase().includes(clientQuery.toLowerCase())
+  ).slice(0, 8);
+  const selectedClient = clients.find(c => c.id === invForm.client_id);
 
   return (
     <div className="space-y-5">
@@ -444,13 +467,12 @@ export default function BillingPage() {
                       <span className="text-footnote text-ios-secondary">{MONTHS_FULL[(b.month||1)-1]} {b.year}</span>
                       {b.due_date && <span className={`text-footnote ${b.status==='overdue' ? 'text-ios-red font-semibold' : 'text-ios-secondary'}`}>Due: {fmtDate(b.due_date)}</span>}
                       {b.paid_date && <span className="text-footnote text-ios-green">Paid: {fmtDate(b.paid_date)}</span>}
-                      {invoiceCurrency !== 'EUR' && <span className="text-footnote text-ios-tertiary">Internal: {fmtCurrency(b.amount)}</span>}
                     </div>
                   </div>
                   <div className="flex items-center gap-2 shrink-0" onClick={e => e.stopPropagation()}>
                     <div className="text-right">
                       <p className="text-subhead font-bold">{fmtInvoiceCurrency(invoiceAmount, invoiceCurrency)}</p>
-                      {invoiceCurrency !== 'EUR' && <p className="text-caption1 text-ios-tertiary">{fmtCurrency(b.amount)} base</p>}
+                      {invoiceCurrency !== 'EUR' && <p className="text-caption1 text-ios-tertiary">1 EUR = {b.exchange_rate || 1} {invoiceCurrency}</p>}
                     </div>
                     <button onClick={() => downloadInvoicePdf(b)}
                       className="px-2.5 py-1.5 bg-blue-50 text-ios-blue rounded-ios text-caption1 font-semibold hover:bg-blue-100 whitespace-nowrap inline-flex items-center gap-1">
@@ -650,24 +672,54 @@ export default function BillingPage() {
               <div>
                 <p className="text-subhead font-semibold text-ios-primary">Internal accounting stays in EUR</p>
                 <p className="text-footnote text-ios-secondary mt-0.5">
-                  Reports use {fmtCurrency(invoicePreviewEur)}. The invoice will show {fmtInvoiceCurrency(invoicePreviewDisplay, invForm.invoice_currency)}.
+                  Subtotal {fmtCurrency(invoicePreviewSubtotal)} + tax {fmtCurrency(invoicePreviewTax)} = reports use {fmtCurrency(invoicePreviewEur)}.
+                  The invoice will show {fmtInvoiceCurrency(invoicePreviewDisplay, invForm.invoice_currency)}.
                 </p>
               </div>
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="col-span-2">
                 <label className="input-label">Client *</label>
-                <select className="input" value={invForm.client_id} onChange={e => applyClientBillingData(e.target.value)}>
-                  <option value="">— Select client —</option>
-                  {Object.entries(CLIENT_TYPES).map(([typeKey, typeInfo]) => {
-                    const typeClients = clients.filter(c => (c.client_type||'direct')===typeKey);
-                    if (!typeClients.length) return null;
-                    return <optgroup key={typeKey} label={typeInfo.label}>{typeClients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</optgroup>;
-                  })}
-                </select>
+                <div className="space-y-2">
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-ios-tertiary" />
+                    <input className="input pl-9" placeholder="Search client..." value={clientQuery}
+                      onChange={e => { setClientQuery(e.target.value); setInvForm(prev => ({ ...prev, client_id: '' })); }}
+                    />
+                  </div>
+                  {selectedClient ? (
+                    <div className="flex items-center justify-between gap-2 rounded-ios bg-blue-50 px-3 py-2">
+                      <div className="min-w-0">
+                        <p className="text-subhead font-semibold text-ios-blue truncate">{selectedClient.name}</p>
+                        {selectedClient.company && <p className="text-caption1 text-ios-secondary truncate">{selectedClient.company}</p>}
+                      </div>
+                      <button onClick={() => { setInvForm(prev => ({ ...prev, client_id: '' })); setClientQuery(''); }}
+                        className="text-caption1 font-semibold text-ios-blue hover:underline">Change</button>
+                    </div>
+                  ) : (
+                    <div className="max-h-44 overflow-y-auto rounded-ios border border-ios-separator/40 bg-white">
+                      {matchingClients.length === 0 ? (
+                        <p className="px-3 py-2 text-footnote text-ios-tertiary">No clients found</p>
+                      ) : matchingClients.map(c => (
+                        <button key={c.id} onClick={() => applyClientBillingData(c.id)}
+                          className="w-full text-left px-3 py-2.5 hover:bg-ios-fill border-b border-ios-separator/30 last:border-0">
+                          <p className="text-subhead font-semibold text-ios-primary">{c.name}</p>
+                          {c.company && <p className="text-caption1 text-ios-secondary">{c.company}</p>}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
               <div><label className="input-label">Invoice #</label><input className="input" placeholder="2025-001" value={invForm.invoice_number} onChange={e => setInvForm({...invForm, invoice_number: e.target.value})}/></div>
-              <div><label className="input-label">Internal amount (EUR) *</label><input className="input" type="number" step="0.01" placeholder="500" value={invForm.amount} onChange={e => setInvForm({...invForm, amount: e.target.value})}/></div>
+              <div><label className="input-label">Subtotal (EUR) *</label><input className="input" type="number" step="0.01" placeholder="500" value={invForm.amount} onChange={e => setInvForm({...invForm, amount: e.target.value})}/></div>
+              <div><label className="input-label">Tax (%)</label><input className="input" type="number" min="0" step="0.01" placeholder="0" value={invForm.tax_rate} onChange={e => setInvForm({...invForm, tax_rate: e.target.value})}/></div>
+              <div>
+                <label className="input-label">Tax amount</label>
+                <div className="input bg-white border border-ios-separator/60">
+                  {fmtInvoiceCurrency(invoicePreviewTaxDisplay, invForm.invoice_currency)}
+                </div>
+              </div>
               <div>
                 <label className="input-label">Invoice currency</label>
                 <select className="input" value={invForm.invoice_currency} onChange={e => {
@@ -733,7 +785,11 @@ export default function BillingPage() {
               {selectedInv && <button onClick={() => downloadInvoicePdf({
                 ...selectedInv,
                 ...invForm,
+                subtotal_amount: invoicePreviewSubtotal,
                 amount: invoicePreviewEur,
+                tax_rate: invoicePreviewTaxRate,
+                tax_amount_eur: invoicePreviewTax,
+                tax_amount_display: invoicePreviewTaxDisplay,
                 display_amount: invoicePreviewDisplay,
                 exchange_rate: invoicePreviewRate,
                 clients: selectedInv.clients,

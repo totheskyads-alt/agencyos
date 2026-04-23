@@ -2,6 +2,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { useTimer } from '@/lib/timerContext';
 import { supabase } from '@/lib/supabase';
+import { getProjectAccess } from '@/lib/projectAccess';
 import { fmtClock, fmtDuration, parseUTC } from '@/lib/utils';
 import { Play, Square, Pause, X, Check, ChevronUp, ChevronDown } from 'lucide-react';
 
@@ -26,7 +27,15 @@ export default function GlobalTimer() {
 
   async function loadProjects() {
     if (projectsLoaded) return;
-    const { data } = await supabase.from('projects').select('id,name,color,clients(name)').eq('status', 'active').order('name');
+    const accessInfo = await getProjectAccess();
+    if (accessInfo.isRestricted && accessInfo.projectIds.length === 0) {
+      setProjects([]);
+      setProjectsLoaded(true);
+      return;
+    }
+    let projectQuery = supabase.from('projects').select('id,name,color,clients(name)').eq('status', 'active').order('name');
+    if (accessInfo.isRestricted) projectQuery = projectQuery.in('id', accessInfo.projectIds);
+    const { data } = await projectQuery;
     setProjects(data || []);
     setProjectsLoaded(true);
   }

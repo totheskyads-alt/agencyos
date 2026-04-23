@@ -96,6 +96,11 @@ export function downloadInvoicePdf(invoice) {
   const currency = invoice.invoice_currency || 'EUR';
   const rate = currency === 'EUR' ? 1 : (Number(invoice.exchange_rate) || 1);
   const amountEur = roundMoney(invoice.amount);
+  const subtotalEur = roundMoney(invoice.subtotal_amount ?? (invoice.tax_rate ? amountEur / (1 + (Number(invoice.tax_rate) || 0) / 100) : amountEur));
+  const taxRate = Number(invoice.tax_rate || 0);
+  const taxAmountEur = roundMoney(invoice.tax_amount_eur ?? subtotalEur * taxRate / 100);
+  const subtotalDisplay = roundMoney(subtotalEur * rate);
+  const taxAmountDisplay = roundMoney(invoice.tax_amount_display ?? taxAmountEur * rate);
   const displayAmount = roundMoney(invoice.display_amount ?? amountEur * rate);
   const monthLabel = `${MONTHS_FULL[(invoice.month || 1) - 1]} ${invoice.year || new Date().getFullYear()}`;
   const itemDescription = invoice.invoice_description?.trim()
@@ -117,10 +122,6 @@ export function downloadInvoicePdf(invoice) {
     lineCommand('Balance Due', 420, 780, 10),
     lineCommand(fmtMoney(displayAmount, currency), 420, 755, 20, 'F2'),
   ];
-
-  if (currency !== 'EUR') {
-    commands.push(lineCommand(`Internal: ${fmtMoney(amountEur, 'EUR')} | 1 EUR = ${rate} ${currency}`, 420, 735, 8));
-  }
 
   commands.push(
     '0.88 0.88 0.9 RG 48 715 m 547 715 l S',
@@ -172,19 +173,23 @@ export function downloadInvoicePdf(invoice) {
     '0.88 0.88 0.9 RG 48 460 m 547 460 l S',
     '0 0 0 rg',
     lineCommand('Sub Total', 380, 425, 10),
-    lineCommand(fmtMoney(displayAmount, currency), 485, 425, 10),
+    lineCommand(fmtMoney(subtotalDisplay, currency), 485, 425, 10),
     lineCommand('Tax', 380, 405, 10),
-    lineCommand(`${Number(invoice.tax_rate || 0).toFixed(2)}%`, 485, 405, 10),
+    lineCommand(`${taxRate.toFixed(2)}% (${fmtMoney(taxAmountDisplay, currency)})`, 455, 405, 10),
     '0.88 0.88 0.9 RG 380 390 m 547 390 l S',
     '0 0 0 rg',
     lineCommand('Total', 380, 368, 13, 'F2'),
     lineCommand(fmtMoney(displayAmount, currency), 470, 368, 13, 'F2'),
     lineCommand('Balance Due', 380, 342, 11, 'F2'),
     lineCommand(fmtMoney(displayAmount, currency), 470, 342, 11, 'F2'),
-    lineCommand('Notes', 48, 250, 10, 'F2'),
   );
 
+  if (currency !== 'EUR') {
+    commands.push(lineCommand(`Exchange rate set on this invoice: 1 EUR = ${rate} ${currency}`, 48, 285, 9));
+  }
+
   if (invoice.notes) {
+    commands.push(lineCommand('Notes', 48, 250, 10, 'F2'));
     wrapText(invoice.notes, 90).slice(0, 3).forEach((line, index) => {
       commands.push(lineCommand(line, 48, 232 - index * 15, 10));
     });

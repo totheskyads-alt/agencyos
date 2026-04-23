@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import Modal from '@/components/Modal';
 import { useRole } from '@/lib/useRole';
+import { getProjectAccess, visibleClientIdsFromProjects } from '@/lib/projectAccess';
 import { fmtDuration, fmtCurrency } from '@/lib/utils';
 import { Plus, Search, ChevronRight, Mail, Phone } from 'lucide-react';
 
@@ -18,6 +19,7 @@ export default function ClientsPage() {
   const [clients, setClients] = useState([]);
   const [clientStats, setClientStats] = useState({});
   const [clientRevenue, setClientRevenue] = useState({});
+  const [access, setAccess] = useState(null);
   const [search, setSearch] = useState('');
   const [filterType, setFilterType] = useState('');
   const [modal, setModal] = useState(false);
@@ -30,14 +32,45 @@ export default function ClientsPage() {
   useEffect(() => { load(); }, []);
 
   async function load() {
-    const { data } = await supabase.from('clients').select('*').order('name');
+    const accessInfo = await getProjectAccess();
+    setAccess(accessInfo);
+
+    let visibleProjectIds = accessInfo.projectIds;
+    let visibleClientIds = null;
+    if (accessInfo.isRestricted) {
+      if (visibleProjectIds.length === 0) {
+        setClients([]);
+        setClientStats({});
+        setClientRevenue({});
+        return;
+      }
+      const { data: visibleProjects } = await supabase
+        .from('projects')
+        .select('id, client_id')
+        .in('id', visibleProjectIds);
+      visibleClientIds = visibleClientIdsFromProjects(visibleProjects || []);
+    }
+
+    let clientQuery = supabase.from('clients').select('*').order('name');
+    if (accessInfo.isRestricted) {
+      if (visibleClientIds.length === 0) {
+        setClients([]);
+        setClientStats({});
+        setClientRevenue({});
+        return;
+      }
+      clientQuery = clientQuery.in('id', visibleClientIds);
+    }
+    const { data } = await clientQuery;
     setClients(data || []);
 
     // Time stats this month
     const monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString();
-    const { data: entries } = await supabase.from('time_entries')
+    let entriesQuery = supabase.from('time_entries')
       .select('duration_seconds, created_at, projects(client_id)')
       .not('end_time','is',null).gte('created_at', monthStart);
+    if (accessInfo.isRestricted) entriesQuery = entriesQuery.in('project_id', visibleProjectIds);
+    const { data: entries } = await entriesQuery;
     const stats = {};
     (entries||[]).forEach(e => {
       const cid = e.projects?.client_id; if (!cid) return;
@@ -48,8 +81,10 @@ export default function ClientsPage() {
 
     // Revenue from billing (paid invoices this year)
     const yearStart = new Date(new Date().getFullYear(), 0, 1).toISOString();
-    const { data: bills } = await supabase.from('billing')
+    let billingQuery = supabase.from('billing')
       .select('client_id, amount').eq('status','paid').gte('created_at', yearStart);
+    if (accessInfo.isRestricted) billingQuery = billingQuery.in('client_id', visibleClientIds);
+    const { data: bills } = await billingQuery;
     const rev = {};
     (bills||[]).forEach(b => { rev[b.client_id] = (rev[b.client_id]||0) + (b.amount||0); });
     setClientRevenue(rev);
@@ -165,7 +200,7 @@ export default function ClientsPage() {
 
       {filtered.length === 0 && (
         <div className="card p-12 text-center">
-          <p className="text-headline font-semibold text-ios-secondary mb-4">No clients yet</p>
+          <p className="text-headline font-semibold text-ios-secondary mb-4">{access?.isRestricted ? 'No clients from assigned projects yet' : 'No clients yet'}</p>
           {canManageClients && <button onClick={openAdd} className="btn-primary">Add Client</button>}
         </div>
       )}

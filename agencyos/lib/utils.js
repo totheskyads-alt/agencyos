@@ -86,10 +86,10 @@ export function getNeglectScore(lastActivityDate) {
 }
 
 export function getNeglectLabel(score) {
-  if (score === 0)  return { label: 'Activ',     color: 'badge-green' };
-  if (score <= 20)  return { label: 'Bun',       color: 'badge-blue' };
-  if (score <= 50)  return { label: 'Atenție',   color: 'badge-orange' };
-  return               { label: 'Neglijat',  color: 'badge-red' };
+  if (score === 0)  return { label: 'Active',    color: 'badge-green' };
+  if (score <= 20)  return { label: 'Good',      color: 'badge-blue' };
+  if (score <= 50)  return { label: 'Attention', color: 'badge-orange' };
+  return               { label: 'Neglected', color: 'badge-red' };
 }
 
 // ─── Color utils ──────────────────────────────────────────────────────────────
@@ -100,16 +100,16 @@ export const PROJECT_COLORS = [
 ];
 
 export const TASK_STATUS = {
-  todo:        { label: 'De făcut',  color: 'badge-gray' },
-  in_progress: { label: 'În lucru', color: 'badge-blue' },
+  todo:        { label: 'To do',     color: 'badge-gray' },
+  in_progress: { label: 'In progress', color: 'badge-blue' },
   review:      { label: 'Review',   color: 'badge-orange' },
-  done:        { label: 'Finalizat',color: 'badge-green' },
+  done:        { label: 'Done',      color: 'badge-green' },
 };
 
 export const TASK_PRIORITY = {
-  low:    { label: 'Scăzut',  color: 'badge-gray' },
-  medium: { label: 'Mediu',   color: 'badge-orange' },
-  high:   { label: 'Ridicat', color: 'badge-red' },
+  low:    { label: 'Low',     color: 'badge-gray' },
+  medium: { label: 'Medium',  color: 'badge-orange' },
+  high:   { label: 'High',    color: 'badge-red' },
   urgent: { label: 'Urgent',  color: 'badge-red' },
 };
 

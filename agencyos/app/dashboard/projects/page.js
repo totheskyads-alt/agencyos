@@ -3,6 +3,8 @@ import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import Modal from '@/components/Modal';
 import { useRole } from '@/lib/useRole';
+import { getProjectAccess, grantProjectAccess, visibleClientIdsFromProjects } from '@/lib/projectAccess';
+import { createProjectAssignedNotification } from '@/lib/notifications';
 import { fmtDuration, fmtCurrency } from '@/lib/utils';
 import { Plus, Search, Euro, Trash2, ChevronDown, FolderOpen, Archive } from 'lucide-react';
 import { useSearchParams } from 'next/navigation';
@@ -17,6 +19,7 @@ const emptyClient = { name:'', company:'', client_type:'direct' };
 export default function ProjectsPage() {
   const [projects, setProjects] = useState([]);
   const [clients, setClients] = useState([]);
+  const [members, setMembers] = useState([]);
   const [search, setSearch] = useState('');
   const [activeTab, setActiveTab] = useState('active'); // active | archived
   const [modal, setModal] = useState(false);
@@ -25,6 +28,7 @@ export default function ProjectsPage() {
   const [form, setForm] = useState(emptyProj);
   const [loading, setLoading] = useState(false);
   const [stats, setStats] = useState({});
+  const [access, setAccess] = useState(null);
   const [invoices, setInvoices] = useState([]);
   const [invForm, setInvForm] = useState({ month: new Date().getMonth()+1, year: new Date().getFullYear(), amount:'' });
   // Inline new client
@@ -32,6 +36,7 @@ export default function ProjectsPage() {
   const [clientSearch, setClientSearch] = useState('');
   const [clientForm, setClientForm] = useState(emptyClient);
   const [savingClient, setSavingClient] = useState(false);
+  const [selectedMemberIds, setSelectedMemberIds] = useState([]);
   const searchParams = useSearchParams();
   const clientFilter = searchParams.get('client') || '';
   const { isAdmin, can } = useRole();
@@ -45,13 +50,37 @@ export default function ProjectsPage() {
   }, [clientFilter, clients]);
 
   async function load() {
-    const [{ data: proj }, { data: cli }] = await Promise.all([
-      supabase.from('projects').select('*, clients(name)').order('created_at',{ascending:false}),
-      supabase.from('clients').select('id,name').order('name'),
+    const accessInfo = await getProjectAccess();
+    setAccess(accessInfo);
+
+    let projectQuery = supabase.from('projects').select('*, clients(name)').order('created_at',{ascending:false});
+    if (accessInfo.isRestricted) {
+      if (accessInfo.projectIds.length === 0) {
+        setProjects([]);
+        setClients([]);
+        setStats({});
+        return;
+      }
+      projectQuery = projectQuery.in('id', accessInfo.projectIds);
+    }
+
+    const [{ data: proj }, { data: mem }] = await Promise.all([
+      projectQuery,
+      supabase.from('profiles').select('id,full_name,email,role').order('full_name'),
     ]);
-    setProjects(proj||[]);
-    setClients(cli||[]);
-    const { data: entries } = await supabase.from('time_entries').select('project_id,duration_seconds').not('end_time','is',null);
+    const visibleProjects = proj || [];
+    const visibleClientIds = visibleClientIdsFromProjects(visibleProjects);
+    let clientQuery = supabase.from('clients').select('id,name').order('name');
+    if (accessInfo.isRestricted) clientQuery = visibleClientIds.length ? clientQuery.in('id', visibleClientIds) : null;
+    const { data: cli } = clientQuery ? await clientQuery : { data: [] };
+
+    setProjects(visibleProjects);
+    setClients(cli || []);
+    setMembers(mem || []);
+
+    let entriesQuery = supabase.from('time_entries').select('project_id,duration_seconds').not('end_time','is',null);
+    if (accessInfo.isRestricted) entriesQuery = entriesQuery.in('project_id', accessInfo.projectIds);
+    const { data: entries } = await entriesQuery;
     const s = {};
     (entries||[]).forEach(e => { if (!e.project_id) return; s[e.project_id] = (s[e.project_id]||0)+(e.duration_seconds||0); });
     setStats(s);
@@ -62,11 +91,33 @@ export default function ProjectsPage() {
     setInvoices(data||[]);
   }
 
-  function openAdd() { if (!canManageProjects) return; setForm(emptyProj); setSelected(null); setShowNewClient(false); setClientForm(emptyClient); setModal(true); }
+  function openAdd() {
+    if (!canManageProjects) return;
+    setForm(emptyProj);
+    setSelected(null);
+    setSelectedMemberIds([]);
+    setShowNewClient(false);
+    setClientForm(emptyClient);
+    setModal(true);
+  }
   function openEdit(p) {
     if (!canManageProjects) return;
     setForm({ name:p.name, description:p.description||'', client_id:p.client_id||'', status:p.status, color:p.color, billing_day:p.billing_day||'', monthly_amount:p.monthly_amount||'' });
-    setSelected(p); setShowNewClient(false); setModal(true);
+    setSelected(p); setShowNewClient(false); setModal(true); loadProjectMembers(p.id);
+  }
+
+  async function loadProjectMembers(projectId) {
+    const { data, error } = await supabase.from('project_members').select('user_id').eq('project_id', projectId);
+    if (error) {
+      console.warn('Project members table not available yet', error);
+      setSelectedMemberIds([]);
+      return;
+    }
+    setSelectedMemberIds((data || []).map(m => m.user_id));
+  }
+
+  function toggleMember(userId) {
+    setSelectedMemberIds(prev => prev.includes(userId) ? prev.filter(id => id !== userId) : [...prev, userId]);
   }
   async function openInvoices(p, e) {
     e.stopPropagation();
@@ -88,9 +139,36 @@ export default function ProjectsPage() {
     if (!form.client_id) { alert('Please select or create a client — required!'); return; }
     if (!form.name.trim()) { alert('Project name is required.'); return; }
     setLoading(true);
+    const { data: { user } } = await supabase.auth.getUser();
     const payload = { ...form, billing_day: form.billing_day ? parseInt(form.billing_day) : null, monthly_amount: form.monthly_amount ? parseFloat(form.monthly_amount) : null };
-    if (selected) await supabase.from('projects').update(payload).eq('id', selected.id);
-    else await supabase.from('projects').insert(payload);
+    let projectId = selected?.id;
+    if (selected) {
+      await supabase.from('projects').update(payload).eq('id', selected.id);
+    } else {
+      const { data } = await supabase.from('projects').insert(payload).select('id').single();
+      projectId = data?.id;
+    }
+    if (isAdmin && projectId) {
+      const { error: deleteError } = await supabase.from('project_members').delete().eq('project_id', projectId);
+      if (!deleteError && selectedMemberIds.length > 0) {
+        const results = await Promise.all(selectedMemberIds.map(userId => grantProjectAccess(projectId, userId)));
+        const accessError = results.find(r => r.error)?.error;
+        if (accessError) {
+          alert(`Project saved, but access could not be saved: ${accessError.message || 'Run the Supabase access SQL and try again.'}`);
+          console.error('Project access save error', accessError);
+        } else {
+          await Promise.all(selectedMemberIds.map(userId => createProjectAssignedNotification({
+            projectId,
+            projectName: form.name,
+            userId,
+            actorId: user?.id,
+          })));
+        }
+      } else if (deleteError) {
+        alert(`Project saved, but access could not be saved: ${deleteError.message || 'Run the Supabase access SQL and try again.'}`);
+        console.error('Project access delete error', deleteError);
+      }
+    }
     setModal(false); setLoading(false); load();
   }
 
@@ -176,7 +254,7 @@ export default function ProjectsPage() {
       {filtered.length === 0 ? (
         <div className="card p-12 text-center">
           <FolderOpen className="w-8 h-8 text-ios-label4 mx-auto mb-3" />
-          <p className="text-headline font-semibold text-ios-secondary mb-4">{activeTab === 'active' ? 'No active projects' : 'No archived projects'}</p>
+          <p className="text-headline font-semibold text-ios-secondary mb-4">{access?.isRestricted && projects.length === 0 ? 'No assigned projects yet' : activeTab === 'active' ? 'No active projects' : 'No archived projects'}</p>
           {activeTab === 'active' && canManageProjects && <button onClick={openAdd} className="btn-primary">New Project</button>}
         </div>
       ) : (() => {
@@ -219,12 +297,6 @@ export default function ProjectsPage() {
                         className="flex items-center gap-1 px-2.5 py-1.5 rounded-ios bg-ios-fill text-ios-secondary text-caption1 font-semibold hover:bg-ios-fill2">
                         View tasks →
                       </a>
-                      {isAdmin && (
-                        <button onClick={e => openInvoices(p, e)}
-                          className="flex items-center gap-1 px-2.5 py-1.5 rounded-ios bg-green-50 text-ios-green text-caption1 font-semibold hover:bg-green-100">
-                          <Euro className="w-3 h-3"/>Invoice
-                        </button>
-                      )}
                       {canManageProjects && (
                         <button onClick={e => toggleArchive(p, e)}
                           className={`flex items-center gap-1 px-2.5 py-1.5 rounded-ios text-caption1 font-semibold ${p.status==='active' ? 'bg-ios-fill text-ios-secondary hover:bg-ios-fill2' : 'bg-blue-50 text-ios-blue hover:bg-blue-100'}`}>
@@ -338,6 +410,35 @@ export default function ProjectsPage() {
                   {[['active','Active'],['archived','Archived']].map(([k,v])=>(
                     <button key={k} onClick={()=>setForm({...form,status:k})} className={`flex-1 py-2 rounded-ios text-footnote font-semibold transition-all ${form.status===k ? 'bg-ios-blue text-white' : 'bg-ios-fill text-ios-secondary'}`}>{v}</button>
                   ))}
+                </div>
+              </div>
+            )}
+
+            {isAdmin && (
+              <div className="bg-ios-bg rounded-ios-lg p-3 space-y-2">
+                <div>
+                  <label className="input-label">Project Access</label>
+                  <p className="text-caption1 text-ios-secondary">Select the managers/operators who can see this project.</p>
+                </div>
+                <div className="max-h-44 overflow-y-auto space-y-1">
+                  {members.filter(m => m.role !== 'admin').map(m => {
+                    const checked = selectedMemberIds.includes(m.id);
+                    return (
+                      <button key={m.id} type="button" onClick={() => toggleMember(m.id)}
+                        className={`w-full flex items-center justify-between gap-3 px-3 py-2 rounded-ios text-left transition-colors ${checked ? 'bg-blue-50 text-ios-blue' : 'bg-white text-ios-primary hover:bg-ios-fill'}`}>
+                        <div className="min-w-0">
+                          <p className="text-footnote font-semibold truncate">{m.full_name || m.email}</p>
+                          <p className="text-caption1 text-ios-secondary capitalize">{m.role || 'operator'}</p>
+                        </div>
+                        <span className={`w-5 h-5 rounded-full border flex items-center justify-center shrink-0 ${checked ? 'bg-ios-blue border-ios-blue text-white' : 'border-ios-separator'}`}>
+                          {checked ? '✓' : ''}
+                        </span>
+                      </button>
+                    );
+                  })}
+                  {members.filter(m => m.role !== 'admin').length === 0 && (
+                    <p className="text-footnote text-ios-tertiary py-2">No manager/operator users yet.</p>
+                  )}
                 </div>
               </div>
             )}
