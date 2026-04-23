@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import Modal from '@/components/Modal';
 import { fmtCurrency, fmtDate, parseUTC } from '@/lib/utils';
+import { downloadInvoicePdf } from '@/lib/invoicePdf';
 import { Plus, Search, AlertCircle, CheckCircle, Clock, FileText, Euro, Trash2, TrendingDown, Download, Calculator } from 'lucide-react';
 
 const INVOICE_STATUS = {
@@ -99,6 +100,31 @@ function normalizeInvoiceForm(b = {}) {
     client_billing_details: b.client_billing_details || '',
     notes: b.notes || ''
   };
+}
+
+function todayIso() {
+  return new Date().toISOString().split('T')[0];
+}
+
+function addDaysIso(days) {
+  const date = new Date();
+  date.setDate(date.getDate() + days);
+  return date.toISOString().split('T')[0];
+}
+
+function generateNextInvoiceNumber(bills) {
+  const maxExisting = (bills || []).reduce((max, bill) => {
+    const match = String(bill.invoice_number || '').match(/(\d+)/g);
+    if (!match) return max;
+    return Math.max(max, ...match.map(n => parseInt(n, 10)).filter(Boolean));
+  }, 0);
+  return String(Math.max(maxExisting + 1, 100)).padStart(5, '0');
+}
+
+function sortNewestFirst(a, b) {
+  const aDate = parseUTC(a.created_at || a.issue_date || `${a.year || 0}-${String(a.month || 1).padStart(2, '0')}-01`);
+  const bDate = parseUTC(b.created_at || b.issue_date || `${b.year || 0}-${String(b.month || 1).padStart(2, '0')}-01`);
+  return (bDate?.getTime() || 0) - (aDate?.getTime() || 0);
 }
 
 export default function BillingPage() {
@@ -251,6 +277,52 @@ export default function BillingPage() {
     setExpModal(false); load();
   }
 
+  function latestInvoiceForClient(clientId) {
+    return [...bills].filter(b => b.client_id === clientId).sort(sortNewestFirst)[0];
+  }
+
+  function latestInvoiceAnyClient() {
+    return [...bills].sort(sortNewestFirst)[0];
+  }
+
+  function clientBillingFallback(clientId) {
+    const client = clients.find(c => c.id === clientId);
+    return [
+      client?.company || client?.name,
+      client?.email,
+    ].filter(Boolean).join('\n');
+  }
+
+  function openNewInvoice() {
+    const latest = latestInvoiceAnyClient();
+    setInvForm({
+      ...emptyInv,
+      invoice_number: generateNextInvoiceNumber(bills),
+      issue_date: todayIso(),
+      due_date: addDaysIso(8),
+      issuer_details: latest?.issuer_details || '',
+      notes: latest?.notes || '',
+    });
+    setSelectedInv(null);
+    setInvModal(true);
+  }
+
+  function applyClientBillingData(clientId) {
+    const lastForClient = latestInvoiceForClient(clientId);
+    const lastAny = latestInvoiceAnyClient();
+    setInvForm(prev => ({
+      ...prev,
+      client_id: clientId,
+      invoice_currency: lastForClient?.invoice_currency || prev.invoice_currency,
+      exchange_rate: lastForClient?.exchange_rate || prev.exchange_rate,
+      tax_rate: lastForClient?.tax_rate ?? prev.tax_rate,
+      issuer_details: lastForClient?.issuer_details || lastAny?.issuer_details || prev.issuer_details,
+      client_billing_details: lastForClient?.client_billing_details || clientBillingFallback(clientId) || prev.client_billing_details,
+      invoice_description: lastForClient?.invoice_description || prev.invoice_description,
+      notes: lastForClient?.notes || prev.notes,
+    }));
+  }
+
   function openEditInv(b) {
     setInvForm(normalizeInvoiceForm(b));
     setSelectedInv(b); setInvModal(true);
@@ -279,7 +351,7 @@ export default function BillingPage() {
           <button onClick={() => { setExpForm(emptyExp); setSelectedExp(null); setExpModal(true); }} className="btn-secondary flex items-center gap-2 text-footnote">
             <TrendingDown className="w-4 h-4" /> Add Expense
           </button>
-          <button onClick={() => { setInvForm(emptyInv); setSelectedInv(null); setInvModal(true); }} className="btn-primary flex items-center gap-2">
+          <button onClick={openNewInvoice} className="btn-primary flex items-center gap-2">
             <Plus className="w-4 h-4" strokeWidth={2.5} /> New Invoice
           </button>
         </div>
@@ -351,7 +423,7 @@ export default function BillingPage() {
 
           <div className="card">
             {filtered.length === 0 ? (
-              <div className="p-12 text-center"><FileText className="w-8 h-8 text-ios-label4 mx-auto mb-3"/><p className="text-subhead text-ios-secondary mb-4">No invoices</p><button onClick={() => { setInvForm(emptyInv); setSelectedInv(null); setInvModal(true); }} className="btn-primary">New Invoice</button></div>
+              <div className="p-12 text-center"><FileText className="w-8 h-8 text-ios-label4 mx-auto mb-3"/><p className="text-subhead text-ios-secondary mb-4">No invoices</p><button onClick={openNewInvoice} className="btn-primary">New Invoice</button></div>
             ) : filtered.map(b => {
               const st = INVOICE_STATUS[b.status]||INVOICE_STATUS.draft;
               const Icon = st.icon;
@@ -380,10 +452,10 @@ export default function BillingPage() {
                       <p className="text-subhead font-bold">{fmtInvoiceCurrency(invoiceAmount, invoiceCurrency)}</p>
                       {invoiceCurrency !== 'EUR' && <p className="text-caption1 text-ios-tertiary">{fmtCurrency(b.amount)} base</p>}
                     </div>
-                    <a href={`/invoice/${b.id}`} target="_blank" rel="noreferrer"
+                    <button onClick={() => downloadInvoicePdf(b)}
                       className="px-2.5 py-1.5 bg-blue-50 text-ios-blue rounded-ios text-caption1 font-semibold hover:bg-blue-100 whitespace-nowrap inline-flex items-center gap-1">
                       <Download className="w-3 h-3" /> PDF
-                    </a>
+                    </button>
                     {b.status!=='paid' && (
                       <button onClick={() => quickPaid(b.id)} className="px-2.5 py-1.5 bg-green-50 text-ios-green rounded-ios text-caption1 font-semibold hover:bg-green-100 whitespace-nowrap">✓ Paid</button>
                     )}
@@ -521,7 +593,7 @@ export default function BillingPage() {
                       <p className="text-subhead font-semibold text-ios-red">🚨 Overdue ({overdue.length})</p>
                     </div>
                     {overdue.map(b => (
-                      <div key={b.id} onClick={() => { setSelectedInv(b); setInvForm({ client_id:b.client_id||'', invoice_number:b.invoice_number||'', amount:b.amount||'', month:b.month||new Date().getMonth()+1, year:b.year||new Date().getFullYear(), issue_date:b.issue_date||'', due_date:b.due_date||'', paid_date:b.paid_date||'', status:b.status||'draft', notes:b.notes||'' }); setInvModal(true); }}
+                      <div key={b.id} onClick={() => openEditInv(b)}
                         className="list-row hover:bg-red-50 cursor-pointer">
                         <div className="flex-1">
                           <p className="text-subhead font-semibold text-ios-red">{b.clients?.name}</p>
@@ -541,7 +613,7 @@ export default function BillingPage() {
                     {dueSoon.map(b => {
                       const daysLeft = Math.round((new Date(b.due_date)-today)/86400000);
                       return (
-                        <div key={b.id} onClick={() => { setSelectedInv(b); setInvModal(true); }}
+                        <div key={b.id} onClick={() => openEditInv(b)}
                           className="list-row hover:bg-ios-bg cursor-pointer">
                           <div className="flex-1">
                             <p className="text-subhead font-semibold">{b.clients?.name}</p>
@@ -585,7 +657,7 @@ export default function BillingPage() {
             <div className="grid grid-cols-2 gap-3">
               <div className="col-span-2">
                 <label className="input-label">Client *</label>
-                <select className="input" value={invForm.client_id} onChange={e => setInvForm({...invForm, client_id: e.target.value})}>
+                <select className="input" value={invForm.client_id} onChange={e => applyClientBillingData(e.target.value)}>
                   <option value="">— Select client —</option>
                   {Object.entries(CLIENT_TYPES).map(([typeKey, typeInfo]) => {
                     const typeClients = clients.filter(c => (c.client_type||'direct')===typeKey);
@@ -658,7 +730,14 @@ export default function BillingPage() {
             </div>
             <div className="flex gap-3 pt-2">
               {selectedInv && <button className="btn-danger flex items-center gap-1" onClick={() => delInvoice(selectedInv.id)}><Trash2 className="w-4 h-4"/></button>}
-              {selectedInv && <a href={`/invoice/${selectedInv.id}`} target="_blank" rel="noreferrer" className="btn-secondary flex items-center gap-2"><Download className="w-4 h-4"/> PDF</a>}
+              {selectedInv && <button onClick={() => downloadInvoicePdf({
+                ...selectedInv,
+                ...invForm,
+                amount: invoicePreviewEur,
+                display_amount: invoicePreviewDisplay,
+                exchange_rate: invoicePreviewRate,
+                clients: selectedInv.clients,
+              })} className="btn-secondary flex items-center gap-2"><Download className="w-4 h-4"/> PDF</button>}
               <button className="btn-secondary flex-1" onClick={() => setInvModal(false)}>Cancel</button>
               <button className="btn-primary flex-1" onClick={saveInvoice} disabled={loading||!invForm.amount||!invForm.client_id}>{loading ? 'Saving...' : 'Save'}</button>
             </div>

@@ -3,7 +3,8 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { fmtDate } from '@/lib/utils';
-import { ArrowLeft, Printer } from 'lucide-react';
+import { downloadInvoicePdf } from '@/lib/invoicePdf';
+import { ArrowLeft, Download } from 'lucide-react';
 
 const MONTHS_FULL = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 
@@ -31,18 +32,21 @@ export default function InvoicePrintPage({ params }) {
 
   useEffect(() => {
     async function loadInvoice() {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) {
-        router.push('/login');
-        return;
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session) {
+          router.push('/login');
+          return;
+        }
+        const { data } = await supabase
+          .from('billing')
+          .select('*, clients(name,company,email,phone,client_type)')
+          .eq('id', params.id)
+          .single();
+        setInvoice(data || null);
+      } finally {
+        setLoading(false);
       }
-      const { data } = await supabase
-        .from('billing')
-        .select('*, clients(name,company,email,phone,client_type)')
-        .eq('id', params.id)
-        .single();
-      setInvoice(data || null);
-      setLoading(false);
     }
     loadInvoice();
   }, [params.id, router]);
@@ -89,8 +93,8 @@ export default function InvoicePrintPage({ params }) {
           <button onClick={() => router.push('/dashboard/billing')} className="btn-secondary flex items-center gap-2">
             <ArrowLeft className="w-4 h-4" /> Billing
           </button>
-          <button onClick={() => window.print()} className="btn-primary flex items-center gap-2">
-            <Printer className="w-4 h-4" /> Print / Save PDF
+          <button onClick={() => downloadInvoicePdf(invoice)} className="btn-primary flex items-center gap-2">
+            <Download className="w-4 h-4" /> Download PDF
           </button>
         </div>
       </div>
@@ -192,7 +196,11 @@ export default function InvoicePrintPage({ params }) {
 
           <footer className="mt-12 pt-6 border-t border-ios-separator">
             <p className="text-footnote uppercase tracking-wide text-ios-secondary mb-2">Notes</p>
-            <p className="text-subhead text-ios-secondary">{invoice.notes || 'Thanks for your business.'}</p>
+            {invoice.notes ? (
+              <p className="text-subhead text-ios-secondary">{invoice.notes}</p>
+            ) : (
+              <p className="text-subhead text-ios-tertiary">No notes.</p>
+            )}
           </footer>
         </section>
       </main>
