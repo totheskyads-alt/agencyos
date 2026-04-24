@@ -78,6 +78,22 @@ export async function createTaskAssignedNotification({ task, assignedUserId, act
   });
 }
 
+export async function createTaskAssignedByUserNotification({ task, assignedUserId, actorId, actorName }) {
+  if (!task?.id || !assignedUserId || assignedUserId === actorId) return;
+
+  const creator = actorName?.trim() || 'A teammate';
+  return createNotification({
+    userId: assignedUserId,
+    type: 'task_assigned',
+    title: 'Task added to your board',
+    body: `${creator} created "${task.title || 'a task'}" for you.`,
+    entityType: 'task',
+    entityId: task.id,
+    entityUrl: `/dashboard/tasks?task=${task.id}&mode=list${task.project_id ? `&project=${task.project_id}` : ''}`,
+    eventKey: `task_assigned:${task.id}:${assignedUserId}`,
+  });
+}
+
 export async function createProjectAssignedNotification({ projectId, projectName, userId, actorId }) {
   if (!projectId || !userId || userId === actorId) return;
 
@@ -208,5 +224,63 @@ export async function ensureDueTodayTaskNotifications(userId) {
     entityId: task.id,
     entityUrl: `/dashboard/tasks?task=${task.id}&mode=list${task.project_id ? `&project=${task.project_id}` : ''}`,
     eventKey: `due_today:${todayIso}:${task.id}:${userId}`,
+  })));
+}
+
+export async function ensureTaskReminderNotifications(userId) {
+  if (!userId) return;
+
+  const nowIso = new Date().toISOString();
+  const { data: tasks, error } = await supabase
+    .from('tasks')
+    .select('id,title,project_id,reminder_at')
+    .eq('assigned_to', userId)
+    .not('reminder_at', 'is', null)
+    .lte('reminder_at', nowIso)
+    .or('is_archived.eq.false,is_archived.is.null')
+    .neq('status', 'done');
+
+  if (error) {
+    console.warn('Task reminders could not be loaded', error);
+    return;
+  }
+
+  await Promise.all((tasks || []).map(task => createNotification({
+    userId,
+    type: 'task_reminder',
+    title: 'Task reminder',
+    body: task.title || 'One of your tasks needs attention.',
+    entityType: 'task',
+    entityId: task.id,
+    entityUrl: `/dashboard/tasks?task=${task.id}&mode=list${task.project_id ? `&project=${task.project_id}` : ''}`,
+    eventKey: `task_reminder:${task.id}:${task.reminder_at}:${userId}`,
+  })));
+}
+
+export async function ensurePendingApprovalNotifications(adminUserId) {
+  if (!adminUserId) return;
+
+  const { data: profiles, error } = await supabase
+    .from('profiles')
+    .select('id,full_name,email,created_at,approval_status,is_deleted')
+    .eq('approval_status', 'pending')
+    .or('is_deleted.is.null,is_deleted.eq.false')
+    .order('created_at', { ascending: false })
+    .limit(20);
+
+  if (error) {
+    console.warn('Pending approvals could not be loaded', error);
+    return;
+  }
+
+  await Promise.all((profiles || []).map(profile => createNotification({
+    userId: adminUserId,
+    type: 'approval_request',
+    title: 'New user waiting approval',
+    body: profile.full_name || profile.email || 'A new account needs review.',
+    entityType: 'profile',
+    entityId: profile.id,
+    entityUrl: `/dashboard/team?pending=${profile.id}`,
+    eventKey: `approval_request:${profile.id}`,
   })));
 }

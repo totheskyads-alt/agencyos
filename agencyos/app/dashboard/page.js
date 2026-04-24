@@ -1,7 +1,7 @@
 'use client';
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
-import { fmtDuration } from '@/lib/utils';
+import { fmtDuration, parseUTC } from '@/lib/utils';
 import { getProjectAccess, visibleClientIdsFromProjects } from '@/lib/projectAccess';
 import { ensureBillingReminderNotifications } from '@/lib/notifications';
 import Modal from '@/components/Modal';
@@ -108,12 +108,12 @@ export default function DashboardPage() {
     const { data: visibleProjects } = await projectQuery;
     if (accessInfo.isRestricted) visibleClientIds = visibleClientIdsFromProjects(visibleProjects || []);
 
-    let todayQ = supabase.from('time_entries').select('duration_seconds,project_id,projects(name,color)').eq('user_id',user.id).not('end_time','is',null).gte('created_at',todayStart);
-    let weekQ = supabase.from('time_entries').select('duration_seconds,project_id,projects(name,color)').eq('user_id',user.id).not('end_time','is',null).gte('created_at',weekStart);
-    let monthQ = supabase.from('time_entries').select('duration_seconds').eq('user_id',user.id).not('end_time','is',null).gte('created_at',monthStart);
+    let todayQ = supabase.from('time_entries').select('duration_seconds,project_id,projects(name,color),start_time').eq('user_id',user.id).not('end_time','is',null).gte('start_time',todayStart);
+    let weekQ = supabase.from('time_entries').select('duration_seconds,project_id,projects(name,color),start_time').eq('user_id',user.id).not('end_time','is',null).gte('start_time',weekStart);
+    let monthQ = supabase.from('time_entries').select('duration_seconds,start_time').eq('user_id',user.id).not('end_time','is',null).gte('start_time',monthStart);
     let clientQ = supabase.from('clients').select('id');
     let tasksQ = supabase.from('tasks').select('id,assigned_to,project_id').or('is_archived.eq.false,is_archived.is.null').not('project_id','is',null);
-    let recentQ = supabase.from('time_entries').select('duration_seconds,description,projects(name,color,clients(name))').eq('user_id',user.id).not('end_time','is',null).order('created_at',{ascending:false}).limit(5);
+    let recentQ = supabase.from('time_entries').select('duration_seconds,description,start_time,projects(name,color,clients(name))').eq('user_id',user.id).not('end_time','is',null).order('start_time',{ascending:false}).limit(5);
 
     if (accessInfo.isRestricted) {
       todayQ = todayQ.in('project_id', visibleProjectIds);
@@ -133,10 +133,13 @@ export default function DashboardPage() {
       recentQ,
     ]);
 
-    const today = (todayEnt||[]).reduce((a,e)=>a+(e.duration_seconds||0),0);
+    const monthEntries = (monthEnt || []).filter(e => parseUTC(e.start_time));
+    const todayEntries = (todayEnt || []).filter(e => parseUTC(e.start_time));
+    const weekEntries = (weekEntFull || []).filter(e => parseUTC(e.start_time));
+    const today = todayEntries.reduce((a,e)=>a+(e.duration_seconds||0),0);
     setTodaySecs(today);
-    setWeekSecs((weekEntFull||[]).reduce((a,e)=>a+(e.duration_seconds||0),0));
-    setMonthSecs((monthEnt||[]).reduce((a,e)=>a+(e.duration_seconds||0),0));
+    setWeekSecs(weekEntries.reduce((a,e)=>a+(e.duration_seconds||0),0));
+    setMonthSecs(monthEntries.reduce((a,e)=>a+(e.duration_seconds||0),0));
     setClientCount(cli?.length||0); setProjectCount(visibleProjects?.length||0);
     // Count tasks visible to this user (same logic as tasks page)
     let taskCount = tasks?.length || 0;
@@ -152,7 +155,7 @@ export default function DashboardPage() {
 
     // Today by project
     const byP = {};
-    (todayEnt||[]).forEach(e => {
+    todayEntries.forEach(e => {
       if (!e.project_id) return;
       if (!byP[e.project_id]) byP[e.project_id] = { name: e.projects?.name||'Unknown', color: e.projects?.color||'#007AFF', secs: 0 };
       byP[e.project_id].secs += (e.duration_seconds||0);
@@ -162,7 +165,7 @@ export default function DashboardPage() {
 
     // Week by project
     const byPW = {};
-    (weekEntFull||[]).forEach(e => {
+    weekEntries.forEach(e => {
       if (!e.project_id) return;
       if (!byPW[e.project_id]) byPW[e.project_id] = { name: e.projects?.name||'Unknown', color: e.projects?.color||'#007AFF', secs: 0 };
       byPW[e.project_id].secs += (e.duration_seconds||0);

@@ -7,14 +7,15 @@ import { fmtDate, fmtClock } from '@/lib/utils';
 import { useRole } from '@/lib/useRole';
 import { useTimer } from '@/lib/timerContext';
 import { getProjectAccess, grantProjectAccess } from '@/lib/projectAccess';
-import { createTaskAssignedNotification, createCommentMentionNotification, findMentionedUsers } from '@/lib/notifications';
+import { createTaskAssignedByUserNotification, createCommentMentionNotification, findMentionedUsers } from '@/lib/notifications';
 import { emitMomentProgress } from '@/lib/teamMoments';
+import { createNextRecurringTask, getOrdinalWeekOfMonth, getWeekdayOnlyValues, normalizeWeekdays, RECURRENCE_END_TYPES, RECURRENCE_MONTH_WEEKS, RECURRENCE_TYPES, RECURRENCE_WEEKDAYS } from '@/lib/taskRecurrence';
 import { useSearchParams } from 'next/navigation';
 import {
-  Plus, Search, ChevronDown, ArrowLeft, MessageSquare,
+  Bell, Plus, Search, ChevronDown, ArrowLeft, MessageSquare,
   Paperclip, Trash2, Send, Archive, Kanban, MoreHorizontal,
   Edit2, X, Check, LayoutList, User, Users, Tag, RotateCcw,
-  Play, Square, Pause, Timer
+  Play, Square, Pause, Timer, Repeat2, Clock3
 } from 'lucide-react';
 
 const DEFAULT_COLS = [
@@ -33,6 +34,7 @@ const PRIORITY = {
 const COL_COLORS = ['#007AFF','#34C759','#FF9500','#FF3B30','#AF52DE','#32ADE6','#5856D6','#FF2D55','#AEAEB2'];
 const VIEW_KEY = 'agencyos_tasks_view';
 const ARCHIVED_PAGE_SIZE = 10;
+const REPEAT_INTERVALS = Array.from({ length: 12 }, (_, index) => index + 1);
 
 function renderCommentText(content) {
   return content.split(/(\s+)/).map((part, i) => {
@@ -59,6 +61,42 @@ function mentionTagFor(member) {
 function activeMentionQuery(value) {
   const match = value.match(/(?:^|\s)@([\p{L}\p{N}._-]*)$/u);
   return match ? match[1].toLowerCase() : null;
+}
+
+function toDateTimeLocalValue(dateStr) {
+  if (!dateStr) return '';
+  const date = new Date(dateStr);
+  if (Number.isNaN(date.getTime())) return '';
+  const pad = value => value.toString().padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function scheduleDayFromTask(task) {
+  if (task?.due_date) return new Date(`${task.due_date}T12:00:00`).getDay();
+  if (task?.reminder_at) return new Date(task.reminder_at).getDay();
+  return new Date().getDay();
+}
+
+function recurrenceSummary(form) {
+  if (form.recurrence_type === 'none') return 'Does not repeat';
+  if (form.recurrence_type === 'daily') {
+    if (form.recurrence_daily_mode === 'weekday') return 'Every weekday';
+    return form.recurrence_interval === 1 ? 'Repeats daily' : `Repeats every ${form.recurrence_interval} days`;
+  }
+  if (form.recurrence_type === 'monthly') {
+    if (form.recurrence_monthly_mode === 'ordinal_weekday') {
+      const weekLabel = RECURRENCE_MONTH_WEEKS.find(item => item.value === form.recurrence_monthly_week)?.label || 'First';
+      const weekdayLabel = RECURRENCE_WEEKDAYS.find(item => item.value === Number(form.recurrence_monthly_weekday))?.label || 'Sunday';
+      return `${weekLabel} ${weekdayLabel} of every ${form.recurrence_interval} month${form.recurrence_interval === 1 ? '' : 's'}`;
+    }
+    return form.recurrence_interval === 1 ? 'Repeats monthly' : `Repeats every ${form.recurrence_interval} months`;
+  }
+  const weekdays = normalizeWeekdays(form.recurrence_weekdays, new Date().getDay())
+    .map(day => RECURRENCE_WEEKDAYS.find(item => item.value === day)?.label?.slice(0, 3))
+    .filter(Boolean)
+    .join(', ');
+  if (form.recurrence_interval === 1) return `Repeats weekly on ${weekdays}`;
+  return `Repeats every ${form.recurrence_interval} weeks on ${weekdays}`;
 }
 
 
@@ -117,9 +155,10 @@ function LabelPill({ label, onRemove }) {
 }
 
 // ─── Task Detail Modal ────────────────────────────────────────────────────────
-function TaskDetail({ task, members, boardColumns, projects, labels: allLabels, activeTimer, elapsed, isPaused, initialTab, onClose, onSave, onDelete, onStartTimer, onStopTimer, onPauseTimer, onProjectCreated, onLabelsChange, currentUser }) {
+function TaskDetail({ task, members, boardColumns, projects, labels: allLabels, activeTimer, elapsed, isPaused, initialTab, onClose, onSave, onDelete, onStartTimer, onStopTimer, onPauseTimer, onProjectCreated, onLabelsChange, currentUser, actorProfile }) {
   const isNew = !task?.id;
   const isTimerActive = activeTimer?.task_id === task?.id;
+  const defaultScheduleDay = scheduleDayFromTask(task);
 
   const [form, setForm] = useState({
     title: task?.title || '',
@@ -127,11 +166,22 @@ function TaskDetail({ task, members, boardColumns, projects, labels: allLabels, 
     assigned_to: task?.assigned_to || currentUser?.id || '',
     priority: task?.priority || 'medium',
     due_date: task?.due_date || '',
+    reminder_at: toDateTimeLocalValue(task?.reminder_at),
     column_id: task?.column_id || boardColumns[0]?.id || '',
     project_id: task?.project_id || '',
+    recurrence_type: task?.recurrence_type || 'none',
+    recurrence_interval: Math.max(1, Number(task?.recurrence_interval) || 1),
+    recurrence_weekdays: normalizeWeekdays(task?.recurrence_weekdays, defaultScheduleDay),
+    recurrence_daily_mode: task?.recurrence_daily_mode || 'interval',
+    recurrence_end_type: task?.recurrence_end_type || 'never',
+    recurrence_until: task?.recurrence_until || '',
+    recurrence_monthly_mode: task?.recurrence_monthly_mode || 'day_of_month',
+    recurrence_monthly_week: task?.recurrence_monthly_week || getOrdinalWeekOfMonth(task?.due_date ? new Date(`${task.due_date}T12:00:00`) : new Date()),
+    recurrence_monthly_weekday: Number(task?.recurrence_monthly_weekday ?? defaultScheduleDay),
   });
   const [comments, setComments] = useState([]);
   const [taskLabels, setTaskLabels] = useState([]);
+  const [mentionMembers, setMentionMembers] = useState([]);
   const [newComment, setNewComment] = useState('');
   const [mentionQuery, setMentionQuery] = useState(null);
   const [commentFile, setCommentFile] = useState(null);
@@ -163,8 +213,21 @@ function TaskDetail({ task, members, boardColumns, projects, labels: allLabels, 
   }, [task?.id]);
 
   useEffect(() => {
+    loadMentionMembers();
+  }, [task?.id, task?.project_id, form.project_id, form.assigned_to, members]);
+
+  useEffect(() => {
     if (initialTab) setTab(initialTab);
   }, [initialTab, task?.id]);
+
+  useEffect(() => {
+    const project = projects.find(p => p.id === form.project_id);
+    if (project) {
+      setProjSearch(project.name || '');
+    } else {
+      setProjSearch('');
+    }
+  }, [form.project_id, projects]);
 
   useEffect(() => {
     if (!form.column_id && boardColumns.length > 0)
@@ -190,6 +253,29 @@ function TaskDetail({ task, members, boardColumns, projects, labels: allLabels, 
   async function loadLabels() {
     const { data } = await supabase.from('task_labels').select('*, labels(*)').eq('task_id', task.id);
     setTaskLabels((data || []).map(tl => tl.labels).filter(Boolean));
+  }
+
+  async function loadMentionMembers() {
+    const projectId = task?.project_id || form.project_id;
+    if (!projectId) {
+      setMentionMembers(members.filter(member => member.id !== currentUser?.id));
+      return;
+    }
+
+    const { data: projectMembers } = await supabase
+      .from('project_members')
+      .select('user_id')
+      .eq('project_id', projectId);
+
+    const allowedIds = new Set((projectMembers || []).map(member => member.user_id).filter(Boolean));
+    members.forEach(member => {
+      if (member.role === 'admin') allowedIds.add(member.id);
+    });
+    if (form.assigned_to) allowedIds.add(form.assigned_to);
+    if (task?.assigned_to) allowedIds.add(task.assigned_to);
+    if (currentUser?.id) allowedIds.add(currentUser.id);
+
+    setMentionMembers(members.filter(member => allowedIds.has(member.id) && member.id !== currentUser?.id));
   }
 
   async function toggleLabel(label) {
@@ -225,15 +311,55 @@ function TaskDetail({ task, members, boardColumns, projects, labels: allLabels, 
 
   async function save() {
     if (!form.title.trim() || !form.project_id) return;
+    if (form.recurrence_type !== 'none' && form.recurrence_end_type === 'on_date' && !form.recurrence_until) {
+      alert('Please choose an end date for this recurring task.');
+      return;
+    }
     setLoading(true);
-    const payload = { ...form, assigned_to: form.assigned_to || null, due_date: form.due_date || null, column_id: form.column_id || boardColumns[0]?.id || null };
+    const previousAssignee = task?.id ? task.assigned_to : null;
+    const payload = {
+      ...form,
+      assigned_to: form.assigned_to || null,
+      due_date: form.due_date || null,
+      reminder_at: form.reminder_at ? new Date(form.reminder_at).toISOString() : null,
+      column_id: form.column_id || boardColumns[0]?.id || null,
+      recurrence_interval: Math.max(1, Number(form.recurrence_interval) || 1),
+      recurrence_daily_mode: form.recurrence_type === 'daily' ? form.recurrence_daily_mode : 'interval',
+      recurrence_weekdays: form.recurrence_type === 'weekly'
+        ? normalizeWeekdays(form.recurrence_weekdays, form.due_date ? new Date(`${form.due_date}T12:00:00`).getDay() : new Date().getDay())
+        : null,
+      recurrence_end_type: form.recurrence_type === 'none' ? 'never' : form.recurrence_end_type || 'never',
+      recurrence_until: form.recurrence_type !== 'none' && form.recurrence_end_type === 'on_date' ? (form.recurrence_until || null) : null,
+      recurrence_monthly_mode: form.recurrence_type === 'monthly' ? form.recurrence_monthly_mode : 'day_of_month',
+      recurrence_monthly_week: form.recurrence_type === 'monthly' && form.recurrence_monthly_mode === 'ordinal_weekday' ? form.recurrence_monthly_week : null,
+      recurrence_monthly_weekday: form.recurrence_type === 'monthly' && form.recurrence_monthly_mode === 'ordinal_weekday' ? Number(form.recurrence_monthly_weekday) : null,
+    };
     let savedTask = task?.id ? { ...task, ...payload } : null;
     if (task?.id) {
-      await supabase.from('tasks').update(payload).eq('id', task.id);
+      let { error } = await supabase.from('tasks').update(payload).eq('id', task.id);
+      if (error && /(reminder_at|recurrence_)/i.test(error.message || '')) {
+        const { reminder_at, recurrence_type, recurrence_interval, recurrence_weekdays, recurrence_daily_mode, recurrence_end_type, recurrence_until, recurrence_monthly_mode, recurrence_monthly_week, recurrence_monthly_weekday, ...fallbackPayload } = payload;
+        ({ error } = await supabase.from('tasks').update(fallbackPayload).eq('id', task.id));
+      }
+      if (error) {
+        setLoading(false);
+        return;
+      }
     } else {
-      const { data: saved } = await supabase.from('tasks')
+      let insertResult = await supabase.from('tasks')
         .insert({ ...payload, status: 'todo', position: 9999 })
         .select().single();
+      if (insertResult.error && /(reminder_at|recurrence_)/i.test(insertResult.error.message || '')) {
+        const { reminder_at, recurrence_type, recurrence_interval, recurrence_weekdays, recurrence_daily_mode, recurrence_end_type, recurrence_until, recurrence_monthly_mode, recurrence_monthly_week, recurrence_monthly_weekday, ...fallbackPayload } = payload;
+        insertResult = await supabase.from('tasks')
+          .insert({ ...fallbackPayload, status: 'todo', position: 9999 })
+          .select().single();
+      }
+      if (insertResult.error) {
+        setLoading(false);
+        return;
+      }
+      const saved = insertResult.data;
       savedTask = saved;
       // Apply pending labels
       if (saved && pendingLabels.length > 0) {
@@ -246,11 +372,12 @@ function TaskDetail({ task, members, boardColumns, projects, labels: allLabels, 
       const { error } = await grantProjectAccess(payload.project_id, payload.assigned_to);
       if (error) console.warn('Could not grant project access from task assignment', error);
     }
-    if (savedTask && payload.assigned_to && payload.assigned_to !== task?.assigned_to) {
-      await createTaskAssignedNotification({
+    if (savedTask && payload.assigned_to && payload.assigned_to !== previousAssignee) {
+      await createTaskAssignedByUserNotification({
         task: savedTask,
         assignedUserId: payload.assigned_to,
         actorId: currentUser?.id,
+        actorName: actorProfile?.full_name || actorProfile?.nickname || actorProfile?.email || currentUser?.email?.split('@')[0],
       });
     }
     setLoading(false); onSave();
@@ -293,7 +420,7 @@ function TaskDetail({ task, members, boardColumns, projects, labels: allLabels, 
       content,
       ...(fileData ? { file_name: fileData.name, file_url: fileData.url, file_type: fileData.type } : {}),
     }).select('id,content').single();
-    const mentionedUsers = findMentionedUsers(content, members);
+    const mentionedUsers = findMentionedUsers(content, mentionMembers);
     if (savedComment && mentionedUsers.length) {
       await Promise.all(mentionedUsers.map(member => createCommentMentionNotification({
         task,
@@ -313,7 +440,7 @@ function TaskDetail({ task, members, boardColumns, projects, labels: allLabels, 
       .eq('id', commentId)
       .select('id,content')
       .single();
-    const mentionedUsers = findMentionedUsers(content, members);
+    const mentionedUsers = findMentionedUsers(content, mentionMembers);
     if (savedComment && mentionedUsers.length) {
       await Promise.all(mentionedUsers.map(member => createCommentMentionNotification({
         task,
@@ -342,8 +469,7 @@ function TaskDetail({ task, members, boardColumns, projects, labels: allLabels, 
     setTimeout(() => commentRef.current?.focus(), 0);
   }
 
-  const mentionSuggestions = mentionQuery === null ? [] : members
-    .filter(member => member.id !== currentUser?.id)
+  const mentionSuggestions = mentionQuery === null ? [] : mentionMembers
     .filter(member => {
       const tag = mentionTagFor(member).toLowerCase();
       const name = (member.full_name || '').toLowerCase();
@@ -405,165 +531,399 @@ function TaskDetail({ task, members, boardColumns, projects, labels: allLabels, 
       )}
 
       {tab === 'details' && (
-        <div className="space-y-4">
-          {/* Project selector */}
-          <div ref={projRef} className="relative">
-            <label className="input-label">Project * <span className="text-ios-red">(required)</span></label>
-            <button onClick={() => setShowProjDrop(!showProjDrop)}
-              className={`input w-full flex items-center justify-between text-left ${!form.project_id ? 'text-ios-tertiary' : 'text-ios-primary'}`}>
-              {selectedProject ? (
-                <span className="flex items-center gap-2">
-                  <span className="w-2 h-2 rounded-full shrink-0" style={{ background: selectedProject.color }} />
-                  {selectedProject.name}
-                  {selectedProject.clients?.name && <span className="text-ios-tertiary text-footnote">· {selectedProject.clients.name}</span>}
-                </span>
-              ) : '— Select project —'}
-              <ChevronDown className="w-4 h-4 text-ios-tertiary shrink-0" />
-            </button>
-            {showProjDrop && (
-              <div className="absolute top-full left-0 right-0 mt-1 bg-white rounded-ios-lg shadow-ios-modal border border-ios-separator/30 z-50 max-h-60 overflow-y-auto">
-                <div className="p-2 border-b border-ios-separator/30 space-y-1">
-                  <input className="input py-1.5 text-footnote" placeholder="Search project..." value={projSearch} onChange={e => setProjSearch(e.target.value)} autoFocus />
-                  <button onClick={async () => {
-                      setShowNewProj(true); setShowProjDrop(false);
-                      const { data: cl } = await supabase.from('clients').select('id,name').order('name');
-                      setProjClients(cl||[]);
-                    }}
-                    className="flex items-center gap-2 w-full px-2 py-1.5 text-footnote text-ios-blue hover:bg-blue-50 rounded-ios font-semibold">
-                    <Plus className="w-3.5 h-3.5" /> New Project
-                  </button>
-                </div>
-                {filteredProjects.map(p => (
-                  <button key={p.id} onClick={() => { setForm(prev => ({ ...prev, project_id: p.id })); setShowProjDrop(false); setProjSearch(''); }}
-                    className={`w-full flex items-center gap-2 px-3 py-2.5 hover:bg-ios-fill text-left ${form.project_id===p.id ? 'bg-blue-50' : ''}`}>
-                    <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: p.color }} />
-                    <div className="flex-1 min-w-0">
-                      <p className="text-subhead font-medium truncate">{p.name}</p>
-                      {p.clients?.name && <p className="text-caption1 text-ios-secondary">{p.clients.name}</p>}
-                    </div>
-                    {form.project_id===p.id && <Check className="w-4 h-4 text-ios-blue shrink-0" />}
-                  </button>
-                ))}
+        <div className="space-y-3">
+          <div className="bg-white px-4 pb-4 space-y-3">
+            <div ref={projRef} className="relative">
+              <label className="input-label">Project *</label>
+              <div className={`h-12 w-full rounded-ios bg-ios-fill border px-3.5 flex items-center gap-3 transition-all ${
+                !form.project_id ? 'border-ios-red/30' : 'border-transparent focus-within:border-ios-blue/40'
+              }`}>
+                {selectedProject && <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: selectedProject.color }} />}
+                <input
+                  className="flex-1 bg-transparent text-body text-ios-primary placeholder:text-ios-tertiary focus:outline-none"
+                  placeholder="Search project..."
+                  value={projSearch}
+                  onFocus={() => setShowProjDrop(true)}
+                  onChange={e => {
+                    const nextValue = e.target.value;
+                    setProjSearch(nextValue);
+                    setShowProjDrop(true);
+                    if (!selectedProject || nextValue !== selectedProject.name) {
+                      setForm(prev => ({ ...prev, project_id: '' }));
+                    }
+                  }}
+                />
+                <ChevronDown className="w-4 h-4 text-ios-tertiary shrink-0" />
               </div>
-            )}
-          </div>
-
-          {showNewProj && (
-            <div className="bg-blue-50 rounded-ios p-3 space-y-2">
-              <div className="flex items-center justify-between">
-                <p className="text-footnote font-semibold text-ios-blue">New Project</p>
-                <button onClick={() => setShowNewProj(false)} className="text-ios-tertiary text-caption1">Cancel</button>
-              </div>
-              <input className="input" placeholder="Project name *" value={newProjName} onChange={e => setNewProjName(e.target.value)} autoFocus />
-              <div>
-                <p className="input-label">Client (required)</p>
-                <select className="input" value={newProjClientId} onChange={e => setNewProjClientId(e.target.value)}>
-                  <option value="">— Select client —</option>
-                  {projClients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                </select>
-              </div>
-              <div className="flex gap-2">{COL_COLORS.slice(0,6).map(c => <button key={c} onClick={() => setNewProjColor(c)} style={{ background: c }} className={`w-6 h-6 rounded-full ${newProjColor===c ? 'ring-2 ring-offset-1 ring-ios-blue' : ''}`} />)}</div>
-              <button className="btn-primary w-full py-1.5 text-footnote" onClick={createProject} disabled={!newProjName.trim()}>
-                Create Project & Select
-              </button>
-            </div>
-          )}
-
-          <div>
-            <label className="input-label">Title *</label>
-            <input className="input" value={form.title} onChange={e => setForm(p => ({ ...p, title: e.target.value }))} placeholder="What needs to be done?" />
-          </div>
-          <div>
-            <label className="input-label">Description</label>
-            <textarea className="input" rows={3} value={form.description} onChange={e => setForm(p => ({ ...p, description: e.target.value }))} placeholder="Details..." />
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="input-label">Assignee</label>
-              <select className="input" value={form.assigned_to} onChange={e => setForm(p => ({ ...p, assigned_to: e.target.value }))}>
-                <option value="">— Nobody —</option>
-                {members.map(m => <option key={m.id} value={m.id}>{m.full_name || m.email}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="input-label">Priority</label>
-              <select className="input" value={form.priority} onChange={e => setForm(p => ({ ...p, priority: e.target.value }))}>
-                {Object.entries(PRIORITY).map(([k,v]) => <option key={k} value={k}>{v.label}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="input-label">Column</label>
-              <select className="input" value={form.column_id} onChange={e => setForm(p => ({ ...p, column_id: e.target.value }))}>
-                {boardColumns.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="input-label">Due Date</label>
-              <input className="input" type="date" value={form.due_date} onChange={e => setForm(p => ({ ...p, due_date: e.target.value }))} />
-            </div>
-          </div>
-
-          {/* Labels */}
-          {(
-            <div ref={labelRef} className="relative">
-              <label className="input-label">Labels</label>
-              <div className="flex flex-wrap gap-1.5 mb-2">
-                {(isNew ? pendingLabels : taskLabels).map(l => <LabelPill key={l.id} label={l} onRemove={() => { if (isNew) setPendingLabels(p=>p.filter(x=>x.id!==l.id)); else toggleLabel(l); }} />)}
-              </div>
-              <button onClick={() => setShowLabelDrop(!showLabelDrop)}
-                className="flex items-center gap-1.5 text-footnote text-ios-blue hover:bg-blue-50 px-2.5 py-1.5 rounded-ios font-semibold">
-                <Tag className="w-3.5 h-3.5" /> Add label
-              </button>
-              {showLabelDrop && (
-                <div className="absolute top-full left-0 mt-1 bg-white rounded-ios-lg shadow-ios-modal border border-ios-separator/30 z-50 w-60 max-h-56 overflow-y-auto">
-                  <div className="p-2 border-b border-ios-separator/30">
-                    <input className="input py-1.5 text-footnote" placeholder="Search..." value={labelSearch} onChange={e => setLabelSearch(e.target.value)} autoFocus />
+              {showProjDrop && (
+                <div className="absolute top-full left-0 right-0 mt-1 bg-white rounded-ios-lg shadow-ios-modal border border-ios-separator/30 z-50 max-h-60 overflow-y-auto">
+                  <div className="p-2 border-b border-ios-separator/30 space-y-1">
+                    <button onClick={async () => {
+                        setShowNewProj(true); setShowProjDrop(false);
+                        const { data: cl } = await supabase.from('clients').select('id,name').order('name');
+                        setProjClients(cl || []);
+                      }}
+                      className="flex items-center gap-2 w-full px-2 py-1.5 text-footnote text-ios-blue hover:bg-blue-50 rounded-ios font-semibold">
+                      <Plus className="w-3.5 h-3.5" /> New Project
+                    </button>
                   </div>
-                  {filteredLabels.map(l => (
-                    <div key={l.id} className="flex items-center gap-1 pr-1 hover:bg-ios-fill">
-                      <button onClick={() => {
-                        if (isNew) {
-                          setPendingLabels(p => p.some(x=>x.id===l.id) ? p.filter(x=>x.id!==l.id) : [...p, l]);
-                        } else {
-                          toggleLabel(l);
-                        }
-                      }} className="flex items-center justify-between flex-1 px-3 py-2.5 text-left">
-                        <span className="flex items-center gap-2">
-                          <span className="w-3 h-3 rounded-full" style={{ background: l.color }} />
-                          <span className="text-subhead">{l.name}</span>
-                        </span>
-                        {(isNew ? pendingLabels : taskLabels).some(tl => tl.id===l.id) && <Check className="w-4 h-4 text-ios-blue" />}
-                      </button>
-                      <button
-                        onClick={e => { e.stopPropagation(); deleteLabelEverywhere(l.id); }}
-                        className="p-1.5 rounded-ios text-ios-tertiary hover:text-ios-red hover:bg-red-50 shrink-0"
-                        title="Delete label"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  ))}
-                  <div className="border-t border-ios-separator/30 p-2">
-                    {showNewLabel ? (
-                      <div className="space-y-2 overflow-y-auto flex-1" style={{maxHeight:'calc(100vh - 260px)'}}>
-                        <input className="input py-1.5 text-footnote" placeholder="Label name" value={newLabelName} onChange={e => setNewLabelName(e.target.value)} autoFocus />
-                        <div className="flex gap-1.5 flex-wrap">{COL_COLORS.map(c => <button key={c} onClick={() => setNewLabelColor(c)} style={{ background: c }} className={`w-5 h-5 rounded-full ${newLabelColor===c ? 'ring-2 ring-offset-1 ring-gray-400' : ''}`} />)}</div>
-                        <div className="flex gap-2">
-                          <button className="btn-secondary flex-1 py-1 text-caption1" onClick={() => setShowNewLabel(false)}>Cancel</button>
-                          <button className="btn-primary flex-1 py-1 text-caption1" onClick={createLabel} disabled={!newLabelName.trim()}>Create</button>
-                        </div>
+                  {filteredProjects.map(p => (
+                    <button key={p.id} onClick={() => { setForm(prev => ({ ...prev, project_id: p.id })); setShowProjDrop(false); setProjSearch(p.name); }}
+                      className={`w-full flex items-center gap-2 px-3 py-2.5 hover:bg-ios-fill text-left ${form.project_id === p.id ? 'bg-blue-50' : ''}`}>
+                      <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: p.color }} />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-subhead font-medium truncate">{p.name}</p>
+                        {p.clients?.name && <p className="text-caption1 text-ios-secondary">{p.clients.name}</p>}
                       </div>
-                    ) : (
-                      <button onClick={() => setShowNewLabel(true)} className="flex items-center gap-2 w-full text-footnote text-ios-blue hover:bg-blue-50 px-2 py-1.5 rounded-ios font-semibold">
-                        <Plus className="w-3.5 h-3.5" /> New label
-                      </button>
-                    )}
-                  </div>
+                      {form.project_id === p.id && <Check className="w-4 h-4 text-ios-blue shrink-0" />}
+                    </button>
+                  ))}
                 </div>
               )}
             </div>
-          )}
+
+            {showNewProj && (
+              <div className="rounded-ios-lg border border-blue-100 bg-blue-50/70 p-3 space-y-2">
+                <div className="flex items-center justify-between">
+                  <p className="text-footnote font-semibold text-ios-blue">New project</p>
+                  <button onClick={() => setShowNewProj(false)} className="text-ios-tertiary text-caption1">Cancel</button>
+                </div>
+                <input className="input bg-white" placeholder="Project name *" value={newProjName} onChange={e => setNewProjName(e.target.value)} autoFocus />
+                <div>
+                  <p className="input-label">Client (required)</p>
+                  <select className="input bg-white" value={newProjClientId} onChange={e => setNewProjClientId(e.target.value)}>
+                    <option value="">— Select client —</option>
+                    {projClients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </select>
+                </div>
+                <div className="flex gap-2">{COL_COLORS.slice(0, 6).map(c => <button key={c} onClick={() => setNewProjColor(c)} style={{ background: c }} className={`w-6 h-6 rounded-full ${newProjColor === c ? 'ring-2 ring-offset-1 ring-ios-blue' : ''}`} />)}</div>
+                <button className="btn-primary w-full py-1.5 text-footnote" onClick={createProject} disabled={!newProjName.trim()}>
+                  Create Project & Select
+                </button>
+              </div>
+            )}
+
+            <div>
+              <label className="input-label">Title *</label>
+              <input className="h-12 w-full rounded-ios bg-ios-fill border border-transparent px-3.5 text-body text-ios-primary placeholder:text-ios-tertiary focus:outline-none focus:ring-2 focus:ring-ios-blue/20 focus:border-ios-blue/40" value={form.title} onChange={e => setForm(p => ({ ...p, title: e.target.value }))} placeholder="What needs to be done?" autoFocus={isNew} />
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+              <div>
+                <label className="input-label-compact">Column</label>
+                <select className="input-compact h-10" value={form.column_id} onChange={e => setForm(p => ({ ...p, column_id: e.target.value }))}>
+                  {boardColumns.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="input-label-compact">Priority</label>
+                <select className="input-compact h-10" value={form.priority} onChange={e => setForm(p => ({ ...p, priority: e.target.value }))}>
+                  {Object.entries(PRIORITY).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="input-label-compact">Assignee</label>
+                <select className="input-compact h-10" value={form.assigned_to} onChange={e => setForm(p => ({ ...p, assigned_to: e.target.value }))}>
+                  <option value="">Nobody</option>
+                  {members.map(m => <option key={m.id} value={m.id}>{m.full_name || m.email}</option>)}
+                </select>
+              </div>
+            </div>
+
+            <div>
+              <div className="flex items-center justify-between gap-3 mb-1">
+                <label className="input-label !mb-0">Description</label>
+                <span className="text-caption2 text-ios-tertiary">Optional</span>
+              </div>
+              <textarea className="min-h-[76px] w-full rounded-ios bg-ios-fill border border-transparent px-3.5 py-3 text-body text-ios-primary placeholder:text-ios-tertiary focus:outline-none focus:ring-2 focus:ring-ios-blue/20 focus:border-ios-blue/40" rows={2} value={form.description} onChange={e => setForm(p => ({ ...p, description: e.target.value }))} placeholder="Context, links, notes..." />
+            </div>
+
+            <div className="space-y-2">
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
+                <div ref={labelRef} className="relative">
+                  <label className="input-label-compact flex items-center gap-1.5"><Tag className="w-3.5 h-3.5 text-ios-tertiary" />Label</label>
+                  <button
+                    onClick={() => setShowLabelDrop(!showLabelDrop)}
+                    className="h-10 w-full rounded-ios bg-ios-fill border border-transparent px-3 flex items-center justify-between gap-2 text-left text-footnote text-ios-primary focus:outline-none focus:ring-2 focus:ring-ios-blue/20 focus:border-ios-blue/40"
+                  >
+                    <span className="truncate">
+                      {(isNew ? pendingLabels : taskLabels).length > 0
+                        ? `${(isNew ? pendingLabels : taskLabels)[0].name}${(isNew ? pendingLabels : taskLabels).length > 1 ? ` +${(isNew ? pendingLabels : taskLabels).length - 1}` : ''}`
+                        : 'Label'
+                      }
+                    </span>
+                    <ChevronDown className="w-4 h-4 text-ios-tertiary shrink-0" />
+                  </button>
+                  {showLabelDrop && (
+                    <div className="absolute top-full left-0 mt-1 bg-white rounded-ios-lg shadow-ios-modal border border-ios-separator/30 z-50 w-60 max-h-56 overflow-y-auto">
+                      <div className="p-2 border-b border-ios-separator/30">
+                        <input className="input py-1.5 text-footnote" placeholder="Search..." value={labelSearch} onChange={e => setLabelSearch(e.target.value)} autoFocus />
+                      </div>
+                      {filteredLabels.map(l => (
+                        <div key={l.id} className="flex items-center gap-1 pr-1 hover:bg-ios-fill">
+                          <button onClick={() => {
+                            if (isNew) {
+                              setPendingLabels(p => p.some(x => x.id === l.id) ? p.filter(x => x.id !== l.id) : [...p, l]);
+                            } else {
+                              toggleLabel(l);
+                            }
+                          }} className="flex items-center justify-between flex-1 px-3 py-2.5 text-left">
+                            <span className="flex items-center gap-2">
+                              <span className="w-3 h-3 rounded-full" style={{ background: l.color }} />
+                              <span className="text-subhead">{l.name}</span>
+                            </span>
+                            {(isNew ? pendingLabels : taskLabels).some(tl => tl.id === l.id) && <Check className="w-4 h-4 text-ios-blue" />}
+                          </button>
+                          <button
+                            onClick={e => { e.stopPropagation(); deleteLabelEverywhere(l.id); }}
+                            className="p-1.5 rounded-ios text-ios-tertiary hover:text-ios-red hover:bg-red-50 shrink-0"
+                            title="Delete label"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      ))}
+                      <div className="border-t border-ios-separator/30 p-2">
+                        {showNewLabel ? (
+                          <div className="space-y-2 overflow-y-auto flex-1" style={{ maxHeight: 'calc(100vh - 260px)' }}>
+                            <input className="input py-1.5 text-footnote" placeholder="Label name" value={newLabelName} onChange={e => setNewLabelName(e.target.value)} autoFocus />
+                            <div className="flex gap-1.5 flex-wrap">{COL_COLORS.map(c => <button key={c} onClick={() => setNewLabelColor(c)} style={{ background: c }} className={`w-5 h-5 rounded-full ${newLabelColor === c ? 'ring-2 ring-offset-1 ring-gray-400' : ''}`} />)}</div>
+                            <div className="flex gap-2">
+                              <button className="btn-secondary flex-1 py-1 text-caption1" onClick={() => setShowNewLabel(false)}>Cancel</button>
+                              <button className="btn-primary flex-1 py-1 text-caption1" onClick={createLabel} disabled={!newLabelName.trim()}>Create</button>
+                            </div>
+                          </div>
+                        ) : (
+                          <button onClick={() => setShowNewLabel(true)} className="flex items-center gap-2 w-full text-footnote text-ios-blue hover:bg-blue-50 px-2 py-1.5 rounded-ios font-semibold">
+                            <Plus className="w-3.5 h-3.5" /> New label
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+                <div>
+                  <label className="input-label-compact flex items-center gap-1.5"><Timer className="w-3.5 h-3.5 text-ios-tertiary" />Due date</label>
+                  <input className="input-compact h-10" type="date" value={form.due_date} onChange={e => setForm(p => ({ ...p, due_date: e.target.value }))} />
+                </div>
+                <div>
+                  <label className="input-label-compact flex items-center gap-1.5"><Bell className="w-3.5 h-3.5 text-ios-tertiary" />Reminder</label>
+                  <input
+                    className="input-compact h-10"
+                    type="datetime-local"
+                    value={form.reminder_at}
+                    onChange={e => setForm(p => ({ ...p, reminder_at: e.target.value }))}
+                  />
+                </div>
+                <div>
+                  <label className="input-label-compact flex items-center gap-1.5"><Repeat2 className="w-3.5 h-3.5 text-ios-tertiary" />Recurrence</label>
+                  <select
+                    className="input-compact h-10"
+                    value={form.recurrence_type}
+                    onChange={e => {
+                      const nextType = e.target.value;
+                      setForm(prev => ({
+                        ...prev,
+                        recurrence_type: nextType,
+                        recurrence_daily_mode: nextType === 'daily' ? prev.recurrence_daily_mode : 'interval',
+                        recurrence_weekdays: nextType === 'weekly'
+                          ? normalizeWeekdays(prev.recurrence_weekdays, prev.due_date ? new Date(`${prev.due_date}T12:00:00`).getDay() : new Date().getDay())
+                          : prev.recurrence_weekdays,
+                      }));
+                    }}
+                  >
+                    {RECURRENCE_TYPES.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+                  </select>
+                </div>
+              </div>
+
+              {(isNew ? pendingLabels : taskLabels).length > 0 && (
+                <div className="flex flex-wrap gap-1.5 pt-0.5">
+                  {(isNew ? pendingLabels : taskLabels).map(l => (
+                    <LabelPill key={l.id} label={l} onRemove={() => { if (isNew) setPendingLabels(p => p.filter(x => x.id !== l.id)); else toggleLabel(l); }} />
+                  ))}
+                </div>
+              )}
+
+              {form.reminder_at && (
+                <p className="text-caption2 text-ios-tertiary">
+                  Reminder sends a notification to the assignee.
+                </p>
+              )}
+
+              {form.recurrence_type !== 'none' && (
+                <div className="rounded-ios border border-blue-100 bg-blue-50/55 p-3 space-y-2">
+                <div className="flex items-center gap-2 min-w-0">
+                  <Repeat2 className="w-4 h-4 text-ios-blue shrink-0" />
+                  <span className="text-footnote font-semibold text-ios-primary shrink-0">{recurrenceSummary(form)}</span>
+                </div>
+
+                {form.recurrence_type === 'daily' && (
+                  <div className="space-y-2">
+                    <label className="flex items-center gap-2 text-footnote text-ios-primary flex-wrap">
+                      <input
+                        type="radio"
+                        className="w-4 h-4 accent-[#007AFF]"
+                        checked={form.recurrence_daily_mode === 'interval'}
+                        onChange={() => setForm(prev => ({ ...prev, recurrence_daily_mode: 'interval' }))}
+                      />
+                      <span>Recur every</span>
+                      <select
+                        className="input-compact !w-[84px] bg-white"
+                        value={form.recurrence_interval}
+                        onChange={e => setForm(prev => ({ ...prev, recurrence_interval: Number(e.target.value) }))}
+                      >
+                        {REPEAT_INTERVALS.map(value => <option key={value} value={value}>{value}</option>)}
+                      </select>
+                      <span>day(s)</span>
+                    </label>
+                    <label className="flex items-center gap-2 text-footnote text-ios-primary">
+                      <input
+                        type="radio"
+                        className="w-4 h-4 accent-[#007AFF]"
+                        checked={form.recurrence_daily_mode === 'weekday'}
+                        onChange={() => setForm(prev => ({ ...prev, recurrence_daily_mode: 'weekday', recurrence_weekdays: getWeekdayOnlyValues() }))}
+                      />
+                      <span>Every weekday</span>
+                    </label>
+                  </div>
+                )}
+
+                {form.recurrence_type === 'weekly' && (
+                  <div className="space-y-2">
+                    <div className="flex flex-wrap items-center gap-2 text-footnote">
+                      <span className="text-ios-secondary shrink-0">Recur every</span>
+                      <select
+                        className="input-compact !w-[84px] bg-white"
+                        value={form.recurrence_interval}
+                        onChange={e => setForm(prev => ({ ...prev, recurrence_interval: Number(e.target.value) }))}
+                      >
+                        {REPEAT_INTERVALS.map(value => <option key={value} value={value}>{value}</option>)}
+                      </select>
+                      <span className="text-ios-secondary shrink-0">week(s) on</span>
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {RECURRENCE_WEEKDAYS.map(day => {
+                        const active = form.recurrence_weekdays.includes(day.value);
+                        return (
+                          <button
+                            key={day.value}
+                            type="button"
+                            onClick={() => setForm(prev => {
+                              const exists = prev.recurrence_weekdays.includes(day.value);
+                              const nextDays = exists
+                                ? prev.recurrence_weekdays.filter(value => value !== day.value)
+                                : [...prev.recurrence_weekdays, day.value];
+                              return {
+                                ...prev,
+                                recurrence_weekdays: normalizeWeekdays(nextDays, day.value),
+                              };
+                            })}
+                            className={`w-9 h-9 rounded-full border text-footnote font-semibold transition-all ${
+                              active
+                                ? 'bg-ios-blue border-ios-blue text-white shadow-ios-sm'
+                                : 'bg-white border-ios-separator/60 text-ios-secondary hover:border-ios-blue/40 hover:text-ios-blue'
+                            }`}
+                            title={day.label}
+                          >
+                            {day.short}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {form.recurrence_type === 'monthly' && (
+                  <div className="space-y-2">
+                    <label className="flex items-center gap-2 text-footnote text-ios-primary flex-wrap">
+                      <input
+                        type="radio"
+                        className="w-4 h-4 accent-[#007AFF]"
+                        checked={form.recurrence_monthly_mode === 'day_of_month'}
+                        onChange={() => setForm(prev => ({ ...prev, recurrence_monthly_mode: 'day_of_month' }))}
+                      />
+                      <span>Day</span>
+                      <span className="inline-flex items-center rounded-ios bg-white px-2.5 py-1 text-footnote font-semibold text-ios-primary border border-ios-separator/30">
+                        {form.due_date ? new Date(`${form.due_date}T12:00:00`).getDate() : 1}
+                      </span>
+                      <span>of every</span>
+                      <select
+                        className="input-compact !w-[84px] bg-white"
+                        value={form.recurrence_interval}
+                        onChange={e => setForm(prev => ({ ...prev, recurrence_interval: Number(e.target.value) }))}
+                      >
+                        {REPEAT_INTERVALS.map(value => <option key={value} value={value}>{value}</option>)}
+                      </select>
+                      <span>month(s)</span>
+                    </label>
+                    <label className="flex items-center gap-2 text-footnote text-ios-primary flex-wrap">
+                      <input
+                        type="radio"
+                        className="w-4 h-4 accent-[#007AFF]"
+                        checked={form.recurrence_monthly_mode === 'ordinal_weekday'}
+                        onChange={() => setForm(prev => ({ ...prev, recurrence_monthly_mode: 'ordinal_weekday' }))}
+                      />
+                      <span>On</span>
+                      <select
+                        className="input-compact !w-auto min-w-[110px] bg-white"
+                        value={form.recurrence_monthly_week}
+                        onChange={e => setForm(prev => ({ ...prev, recurrence_monthly_week: e.target.value }))}
+                        disabled={form.recurrence_monthly_mode !== 'ordinal_weekday'}
+                      >
+                        {RECURRENCE_MONTH_WEEKS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+                      </select>
+                      <select
+                        className="input-compact !w-auto min-w-[118px] bg-white"
+                        value={form.recurrence_monthly_weekday}
+                        onChange={e => setForm(prev => ({ ...prev, recurrence_monthly_weekday: Number(e.target.value) }))}
+                        disabled={form.recurrence_monthly_mode !== 'ordinal_weekday'}
+                      >
+                        {RECURRENCE_WEEKDAYS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+                      </select>
+                      <span>of every</span>
+                      <select
+                        className="input-compact !w-[84px] bg-white"
+                        value={form.recurrence_interval}
+                        onChange={e => setForm(prev => ({ ...prev, recurrence_interval: Number(e.target.value) }))}
+                      >
+                        {REPEAT_INTERVALS.map(value => <option key={value} value={value}>{value}</option>)}
+                      </select>
+                      <span>month(s)</span>
+                    </label>
+                  </div>
+                )}
+
+                {form.recurrence_type !== 'none' && (
+                  <div className="flex flex-wrap items-center gap-2 text-footnote">
+                    <span className="text-ios-secondary shrink-0">Ends</span>
+                    <select
+                      className="input-compact !w-auto min-w-[170px] bg-white"
+                      value={form.recurrence_end_type}
+                      onChange={e => setForm(prev => ({ ...prev, recurrence_end_type: e.target.value }))}
+                    >
+                      {RECURRENCE_END_TYPES.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+                    </select>
+                    {form.recurrence_end_type === 'on_date' && (
+                      <input
+                        className="input-compact !w-auto min-w-[160px] bg-white"
+                        type="date"
+                        value={form.recurrence_until}
+                        onChange={e => setForm(prev => ({ ...prev, recurrence_until: e.target.value }))}
+                      />
+                    )}
+                  </div>
+                )}
+
+                {form.recurrence_type !== 'none' && (
+                  <p className="text-caption2 text-ios-tertiary">
+                    When this task is marked done, the next one is created automatically using the rule above.
+                  </p>
+                )}
+                </div>
+              )}
+            </div>
+          </div>
 
           <div className="flex gap-2 pt-2 flex-wrap">
             {task?.id && !task?.is_archived && (
@@ -761,6 +1121,12 @@ function TaskRow({ task, members, boardColumns, taskLabels, activeTimer, elapsed
       <div className="w-2 h-2 rounded-full shrink-0" style={{ background: pri?.dot || '#AEAEB2' }} />
       <div className="flex-1 min-w-0">
         <p className={`text-subhead ${done ? 'line-through text-ios-tertiary' : 'text-ios-primary'} truncate`}>{task.title}</p>
+        {task.description && (
+          <p className="mt-0.5 text-caption1 text-ios-secondary overflow-hidden"
+            style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>
+            {task.description}
+          </p>
+        )}
         {labels.length > 0 && (
           <div className="flex gap-1 mt-0.5 flex-wrap">
             {labels.slice(0,3).map(l => <span key={l.id} className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full text-white" style={{ background: l.color }}>{l.name}</span>)}
@@ -770,6 +1136,8 @@ function TaskRow({ task, members, boardColumns, taskLabels, activeTimer, elapsed
       {col && <span className="text-caption2 font-semibold px-2 py-0.5 rounded-full shrink-0 hidden lg:inline" style={{ background: col.color+'25', color: col.color }}>{col.name}</span>}
       <div className="flex items-center gap-2 shrink-0">
         {task.comment_count > 0 && <div className="flex items-center gap-0.5 text-ios-tertiary"><MessageSquare className="w-3 h-3" /><span className="text-caption2">{task.comment_count}</span></div>}
+        {task.reminder_at && !done && <div className="flex items-center gap-0.5 text-ios-orange"><Bell className="w-3 h-3" /><span className="text-caption2">Reminder</span></div>}
+        {task.recurrence_type && task.recurrence_type !== 'none' && <div className="flex items-center gap-0.5 text-ios-blue"><Repeat2 className="w-3 h-3" /><span className="text-caption2">Repeat</span></div>}
         {task.due_date && <span className={`text-caption1 font-medium ${isOverdue ? 'text-ios-red' : 'text-ios-tertiary'}`}>{new Date(task.due_date).toLocaleDateString('en-US',{day:'numeric',month:'short'})}</span>}
         <QuickTimer task={task} activeTimer={activeTimer} elapsed={elapsed} isPaused={isPaused} onStart={onStartTimer} onStop={onStopTimer} onPause={onPauseTimer} />
         {/* Quick archive button */}
@@ -1137,6 +1505,10 @@ export default function TasksPage() {
     setTasks(p => p.map(t => t.id===task.id ? { ...t, status: newStatus } : t));
     if (newStatus === 'done') {
       emitMomentProgress({ source: 'task_done', taskId: task.id });
+      if (task.recurrence_type && task.recurrence_type !== 'none') {
+        await createNextRecurringTask(task);
+        await loadTasks();
+      }
     }
   }
 
@@ -1231,7 +1603,7 @@ export default function TasksPage() {
               <ArrowLeft className="w-3.5 h-3.5" /> Back
             </button>
           ) : (
-            <button onClick={() => setTaskModal({ project_id: filterProject||'' })} className="btn-primary flex items-center gap-1.5">
+            <button onClick={() => setTaskModal({})} className="btn-primary flex items-center gap-1.5">
               <Plus className="w-4 h-4" strokeWidth={2.5} /> New Task
             </button>
           )}
@@ -1346,7 +1718,7 @@ export default function TasksPage() {
           {Object.keys(byProject).length === 0 ? (
             <div className="p-12 text-center">
               <p className="text-subhead text-ios-secondary mb-4">{hasFilters ? 'No tasks match filters' : 'No tasks yet'}</p>
-              <button onClick={() => setTaskModal({ project_id: filterProject||'' })} className="btn-primary">New Task</button>
+              <button onClick={() => setTaskModal({})} className="btn-primary">New Task</button>
             </div>
           ) : Object.entries(byProject).map(([pid, { project, tasks: projTasks }]) => {
             const openTasks = projTasks.filter(t => t.status!=='done');
@@ -1368,7 +1740,7 @@ export default function TasksPage() {
                     {project?.clients?.name && <span className="text-footnote text-ios-secondary">· {project.clients.name}</span>}
                     <span className="text-caption1 text-ios-tertiary bg-white border border-ios-separator px-1.5 py-0.5 rounded-full font-semibold">{openTasks.length}</span>
                   </div>
-                  <button onClick={() => setTaskModal({ project_id: pid })} className="p-1.5 rounded-ios hover:bg-ios-fill text-ios-tertiary hover:text-ios-blue">
+                  <button onClick={() => setTaskModal({})} className="p-1.5 rounded-ios hover:bg-ios-fill text-ios-tertiary hover:text-ios-blue">
                     <Plus className="w-3.5 h-3.5"/>
                   </button>
                 </div>
@@ -1470,7 +1842,7 @@ export default function TasksPage() {
                 <ColHeader col={col}
                   onRename={() => { setEditColModal(col); setEditColName(col.name); }}
                   onDelete={() => deleteColumn(col)}
-                  onAdd={colId => setTaskModal({ column_id: colId, project_id: filterProject||'', assigned_to: viewingUserId || currentUser?.id || '' })}
+                  onAdd={colId => setTaskModal({ column_id: colId, assigned_to: viewingUserId || currentUser?.id || '' })}
                   onDragStart={() => setDragCol(col.id)}
                   onDragEnd={() => { setDragCol(null); setDragOverCol(null); }} />
                 <div
@@ -1557,6 +1929,13 @@ export default function TasksPage() {
                           </button>
                         </div>
 
+                        {task.description && (
+                          <p className="mt-1.5 text-[11px] leading-snug text-ios-secondary overflow-hidden"
+                            style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>
+                            {task.description}
+                          </p>
+                        )}
+
                         {/* Row 3: project + meta */}
                         <div className="flex items-center justify-between mt-1.5 gap-1">
                           <div className="flex items-center gap-1.5 min-w-0">
@@ -1569,6 +1948,16 @@ export default function TasksPage() {
                             {task.comment_count > 0 && (
                               <div className="flex items-center gap-0.5 text-ios-tertiary shrink-0">
                                 <MessageSquare className="w-3 h-3"/><span className="text-[10px]">{task.comment_count}</span>
+                              </div>
+                            )}
+                            {task.reminder_at && !isDone && (
+                              <div className="flex items-center gap-0.5 text-ios-orange shrink-0">
+                                <Bell className="w-3 h-3"/><span className="text-[10px]">Reminder</span>
+                              </div>
+                            )}
+                            {task.recurrence_type && task.recurrence_type !== 'none' && (
+                              <div className="flex items-center gap-0.5 text-ios-blue shrink-0">
+                                <Repeat2 className="w-3 h-3"/><span className="text-[10px]">Repeat</span>
                               </div>
                             )}
                             {pri && task.priority !== 'medium' && (
@@ -1626,7 +2015,6 @@ export default function TasksPage() {
                   </div>
                   <button onClick={() => setTaskModal({
                       column_id: col.id,
-                      project_id: filterProject||'',
                       assigned_to: viewingUserId || currentUser?.id || '',
                     })}
                     className="w-full py-2.5 text-footnote font-semibold text-ios-blue hover:bg-blue-50 border-2 border-ios-blue/30 hover:border-ios-blue rounded-ios flex items-center justify-center gap-1.5 transition-all">
@@ -1689,6 +2077,7 @@ export default function TasksPage() {
       {taskModal !== null && (
         <TaskDetail task={taskModal} members={members} boardColumns={boardColumns} projects={projects} labels={labels}
           activeTimer={activeTimer} elapsed={elapsed} currentUser={currentUser}
+          actorProfile={userProfile}
           initialTab={urlTab === 'comments' ? 'comments' : undefined}
           onClose={() => setTaskModal(null)}
           onSave={() => { setTaskModal(null); loadTasks(); try { localStorage.setItem('sm_tasks_updated', Date.now().toString()); } catch {} }}

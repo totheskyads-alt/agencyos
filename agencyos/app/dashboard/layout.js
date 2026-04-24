@@ -92,16 +92,16 @@ export default function DashboardLayout({ children }) {
         <Sidebar user={user} profile={profile} open={mobileNavOpen} setOpen={setMobileNavOpen} />
         <TeamMomentOverlay userId={user?.id} />
 
-        <header className="fixed top-0 left-0 right-0 lg:left-60 z-40 h-16 bg-white/90 backdrop-blur-ios border-b border-ios-separator/40">
-          <div className="h-full px-4 lg:px-6 flex items-center justify-between gap-4">
-            <div className="flex items-center gap-3 min-w-0">
+        <header className="fixed top-0 left-0 right-0 lg:left-60 z-40 h-12 bg-white/94 backdrop-blur-ios border-b border-ios-separator/40">
+          <div className="h-full px-3 lg:px-5 flex items-center justify-between lg:justify-end gap-3">
+            <div className="flex items-center gap-3 min-w-0 lg:hidden">
               <button onClick={() => setMobileNavOpen(v => !v)} className="lg:hidden p-2 -ml-2 rounded-ios hover:bg-ios-fill transition-colors">
                 {mobileNavOpen ? <X className="w-5 h-5 text-ios-secondary" /> : <Menu className="w-5 h-5 text-ios-secondary" />}
               </button>
               <Link href="/dashboard" className="flex items-center gap-2 min-w-0 rounded-ios hover:opacity-90 transition-opacity">
                 <img src="/logo.jpg" alt="Sky Metrics" className="w-8 h-8 rounded-full object-cover shadow-ios-sm" />
                 <div className="min-w-0">
-                  <p className="text-headline font-bold text-ios-primary truncate">Sky Metrics</p>
+                  <p className="text-subhead font-bold text-ios-primary truncate">Sky Metrics</p>
                 </div>
               </Link>
             </div>
@@ -112,8 +112,8 @@ export default function DashboardLayout({ children }) {
           </div>
         </header>
 
-        <main className="flex-1 lg:ml-60 pt-20 pb-16 min-h-screen">
-          <div className="p-4 lg:p-6">
+        <main className="flex-1 lg:ml-60 pt-12 pb-16 min-h-screen">
+          <div className="p-3 lg:p-5">
             {children}
           </div>
         </main>

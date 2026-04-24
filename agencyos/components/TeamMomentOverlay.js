@@ -48,6 +48,7 @@ export const MOMENT_STYLES = {
 function TeamMoment({ moment, onDismiss }) {
   const style = MOMENT_STYLES[moment?.style] || MOMENT_STYLES.motivation;
   const senderName = moment?.sender?.full_name || moment?.sender?.email?.split('@')[0] || 'Team';
+  const systemLogo = moment?.sender?.isSystem ? '/logo.jpg' : null;
 
   return (
     <div className="fixed top-[5.1rem] left-1/2 z-[45] w-[min(48rem,calc(100vw-1rem))] -translate-x-1/2 pointer-events-none">
@@ -78,8 +79,8 @@ function TeamMoment({ moment, onDismiss }) {
           <div className="team-moment-copy">
             <div className="flex items-center gap-2 flex-wrap mb-2">
               <span className="team-moment-from">
-                {moment?.sender?.avatar_url ? (
-                  <img src={moment.sender.avatar_url} alt={senderName} className="w-5 h-5 rounded-full object-cover" />
+                {moment?.sender?.avatar_url || systemLogo ? (
+                  <img src={moment.sender.avatar_url || systemLogo} alt={senderName} className="w-5 h-5 rounded-full object-cover" />
                 ) : (
                   <span className="team-moment-from-avatar">
                     {senderName.slice(0, 1).toUpperCase()}
@@ -307,7 +308,11 @@ export default function TeamMomentOverlay({ userId }) {
 
     if (insertError) return null;
 
-    return { ...autoMoment, delivery_id: insertedDelivery?.id || null };
+    return {
+      ...autoMoment,
+      sender: { full_name: 'Sky Metrics', avatar_url: '/logo.jpg', isSystem: true },
+      delivery_id: insertedDelivery?.id || null,
+    };
   }
 
   async function dismissMoment() {

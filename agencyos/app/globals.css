@@ -38,8 +38,16 @@ body {
            placeholder-ios-tertiary focus:outline-none focus:ring-2 focus:ring-ios-blue/30
            focus:bg-white transition-all;
   }
+  .input-compact {
+    @apply w-full bg-ios-fill border border-transparent rounded-ios px-3 py-2 text-footnote text-ios-primary
+           placeholder-ios-tertiary focus:outline-none focus:ring-2 focus:ring-ios-blue/20
+           focus:border-ios-blue/10 focus:bg-white transition-all;
+  }
   .input-label {
     @apply block text-footnote font-semibold text-ios-secondary uppercase tracking-wide mb-1.5;
+  }
+  .input-label-compact {
+    @apply block text-caption2 font-bold text-ios-tertiary uppercase tracking-wide mb-1;
   }
 
   /* Cards */
@@ -368,6 +376,12 @@ body {
 
 .team-moment-title {
   display: inline;
+  padding: 10px 14px;
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.94);
+  box-shadow: 0 16px 32px rgba(28, 28, 30, 0.1);
+  backdrop-filter: blur(10px);
   font-size: clamp(28px, 3vw, 42px);
   line-height: 1.02;
   font-weight: 900;
@@ -377,6 +391,12 @@ body {
 
 .team-moment-body {
   display: inline;
+  padding: 9px 13px;
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.88);
+  border: 1px solid rgba(255, 255, 255, 0.92);
+  box-shadow: 0 12px 26px rgba(28, 28, 30, 0.08);
+  backdrop-filter: blur(10px);
   font-size: 16px;
   line-height: 1.35;
   font-weight: 600;

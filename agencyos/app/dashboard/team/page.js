@@ -1,5 +1,6 @@
 'use client';
 import { useState, useEffect } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { useRole } from '@/lib/useRole';
 import { fmtDuration } from '@/lib/utils';
@@ -27,6 +28,8 @@ const ROLES = {
 };
 
 export default function TeamPage() {
+  const searchParams = useSearchParams();
+  const pendingMemberId = searchParams.get('pending') || '';
   const [members, setMembers] = useState([]);
   const [stats, setStats] = useState({});
   const [currentUserId, setCurrentUserId] = useState(null);
@@ -50,7 +53,13 @@ export default function TeamPage() {
       .select('*')
       .or('is_deleted.is.null,is_deleted.eq.false')
       .order('full_name');
-    setMembers(profiles || []);
+    const sortedMembers = [...(profiles || [])].sort((a, b) => {
+      const score = status => (status === 'pending' ? 0 : status === 'rejected' ? 1 : 2);
+      const byStatus = score(a.approval_status) - score(b.approval_status);
+      if (byStatus !== 0) return byStatus;
+      return (a.full_name || a.email || '').localeCompare(b.full_name || b.email || '');
+    });
+    setMembers(sortedMembers);
 
     const weekStart = new Date(Date.now() - 7 * 86400000).toISOString();
     const monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString();
@@ -195,7 +204,7 @@ export default function TeamPage() {
           const initials = (m.full_name || m.email || 'U').split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2);
 
           return (
-            <div key={m.id} className={`card p-4 ${isMe ? 'ring-2 ring-ios-blue' : ''}`}>
+            <div key={m.id} className={`card p-4 ${isMe ? 'ring-2 ring-ios-blue' : pendingMemberId === m.id ? 'ring-2 ring-ios-orange' : ''}`}>
               <div className="flex items-center gap-4">
                 {m.avatar_url ? (
                   <img src={m.avatar_url} alt="avatar" className="w-12 h-12 rounded-full object-cover shrink-0 ring-2 ring-ios-separator/60" />
@@ -237,7 +246,7 @@ export default function TeamPage() {
                 )}
               </div>
 
-              {isAdmin && !isMe && (
+              {isAdmin && !isMe && approvalStatus !== 'approved' && (
                 <div className="mt-3 pt-3 border-t border-ios-separator/30">
                   <p className="text-caption1 text-ios-tertiary mb-2 uppercase tracking-wide font-semibold">Access</p>
                   <div className="flex gap-2 mb-3">

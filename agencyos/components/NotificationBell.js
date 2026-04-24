@@ -2,8 +2,37 @@
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
-import { ensureDueTodayTaskNotifications } from '@/lib/notifications';
-import { AtSign, Bell, BriefcaseBusiness, CheckCheck, Clock3, MessageCircle, ReceiptText, Sparkles, X } from 'lucide-react';
+import { ensureDueTodayTaskNotifications, ensurePendingApprovalNotifications, ensureTaskReminderNotifications } from '@/lib/notifications';
+import { AtSign, Bell, BellRing, BriefcaseBusiness, CheckCheck, Clock3, MessageCircle, ReceiptText, ShieldAlert, Sparkles, Volume2, VolumeX, X } from 'lucide-react';
+
+const SOUND_MARKS = [
+  { value: 0, label: 'Silent' },
+  { value: 35, label: 'Soft' },
+  { value: 70, label: 'Normal' },
+  { value: 100, label: 'Loud' },
+];
+
+function getStoredSoundVolume() {
+  if (typeof window === 'undefined') return 70;
+  const volume = localStorage.getItem('sm_notification_sound_volume');
+  if (volume != null) {
+    const parsed = Number(volume);
+    if (!Number.isNaN(parsed)) return Math.max(0, Math.min(100, parsed));
+  }
+
+  const legacy = localStorage.getItem('sm_notification_sound');
+  if (legacy === 'silent') return 0;
+  if (legacy === 'soft') return 35;
+  if (legacy === 'loud') return 100;
+  return 70;
+}
+
+function labelForVolume(volume) {
+  if (volume <= 0) return 'Silent';
+  if (volume < 45) return 'Soft';
+  if (volume < 85) return 'Normal';
+  return 'Loud';
+}
 
 function labelFor(type) {
   return {
@@ -12,6 +41,8 @@ function labelFor(type) {
     project_assigned: 'Project',
     comment_mention: 'Mention',
     broadcast: 'Message',
+    task_reminder: 'Reminder',
+    approval_request: 'Approval',
   }[type] || 'Notice';
 }
 
@@ -47,6 +78,18 @@ function styleFor(type) {
       text: 'text-ios-blue',
       ring: 'ring-blue-100',
     },
+    task_reminder: {
+      icon: BellRing,
+      bg: 'bg-amber-50',
+      text: 'text-amber-600',
+      ring: 'ring-amber-100',
+    },
+    approval_request: {
+      icon: ShieldAlert,
+      bg: 'bg-purple-50',
+      text: 'text-ios-purple',
+      ring: 'ring-purple-100',
+    },
   }[type] || {
     icon: Sparkles,
     bg: 'bg-ios-fill',
@@ -68,15 +111,18 @@ function timeAgo(value) {
   return new Date(value).toLocaleDateString('en-US', { day: 'numeric', month: 'short' });
 }
 
-function playNotificationSound() {
+function playNotificationSound(volume = 70) {
   if (typeof window === 'undefined') return;
+  const normalizedVolume = Math.max(0, Math.min(100, Number(volume) || 0));
+  if (normalizedVolume <= 0) return;
   const AudioContext = window.AudioContext || window.webkitAudioContext;
   if (!AudioContext) return;
 
   const context = new AudioContext();
   const master = context.createGain();
+  const gainMultiplier = 0.45 + (normalizedVolume / 100) * 0.9;
   master.gain.setValueAtTime(0.0001, context.currentTime);
-  master.gain.exponentialRampToValueAtTime(0.13, context.currentTime + 0.02);
+  master.gain.exponentialRampToValueAtTime(0.13 * gainMultiplier, context.currentTime + 0.02);
   master.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + 0.72);
   master.connect(context.destination);
 
@@ -105,17 +151,25 @@ export default function NotificationBell() {
   const latestSeenRef = useRef(null);
   const [open, setOpen] = useState(false);
   const [userId, setUserId] = useState(null);
+  const [role, setRole] = useState('operator');
   const [items, setItems] = useState([]);
+  const [soundVolume, setSoundVolume] = useState(70);
 
   const unread = items.filter(n => !n.read_at).length;
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    setSoundVolume(getStoredSoundVolume());
+  }, []);
+
+  useEffect(() => {
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
       const user = session?.user;
       if (!user) return;
       setUserId(user.id);
-      load(user.id);
-      ensureDueTodayTaskNotifications(user.id);
+      const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).single();
+      const nextRole = profile?.role || 'operator';
+      setRole(nextRole);
+      load(user.id, nextRole);
     });
   }, []);
 
@@ -137,20 +191,25 @@ export default function NotificationBell() {
       }, payload => {
         const notification = payload.new;
         setItems(prev => [notification, ...prev.filter(n => n.id !== notification.id)].slice(0, 20));
-        playNotificationSound();
+        playNotificationSound(soundVolume);
       })
       .subscribe();
 
-    const interval = setInterval(() => load(userId), 20000);
+    const interval = setInterval(() => load(userId, role), 20000);
 
     return () => {
       clearInterval(interval);
       supabase.removeChannel(channel);
     };
-  }, [userId]);
+  }, [userId, role, soundVolume]);
 
-  async function load(uid = userId) {
+  async function load(uid = userId, currentRole = role) {
     if (!uid) return;
+    await Promise.all([
+      ensureDueTodayTaskNotifications(uid),
+      ensureTaskReminderNotifications(uid),
+      currentRole === 'admin' ? ensurePendingApprovalNotifications(uid) : Promise.resolve(),
+    ]);
     const { data, error } = await supabase
       .from('notifications')
       .select('*')
@@ -161,7 +220,7 @@ export default function NotificationBell() {
       const nextItems = data || [];
       const newest = nextItems[0];
       if (initializedRef.current && newest?.id && latestSeenRef.current && newest.id !== latestSeenRef.current && !newest.read_at) {
-        playNotificationSound();
+        playNotificationSound(soundVolume);
       }
       latestSeenRef.current = newest?.id || null;
       initializedRef.current = true;
@@ -194,6 +253,9 @@ export default function NotificationBell() {
         .single();
       if (data?.client_id) return `/dashboard/billing?newInvoice=1&client=${data.client_id}&project=${data.id}`;
     }
+    if (notification.type === 'approval_request') {
+      return notification.entity_url || '/dashboard/team';
+    }
     return notification.entity_url;
   }
 
@@ -221,6 +283,16 @@ export default function NotificationBell() {
     const readAt = new Date().toISOString();
     setItems(prev => prev.map(n => ({ ...n, read_at: n.read_at || readAt })));
     await supabase.from('notifications').update({ read_at: readAt }).eq('user_id', userId).is('read_at', null);
+  }
+
+  function updateSoundVolume(nextVolume) {
+    const safeVolume = Math.max(0, Math.min(100, Number(nextVolume) || 0));
+    setSoundVolume(safeVolume);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('sm_notification_sound_volume', String(safeVolume));
+      localStorage.setItem('sm_notification_sound', labelForVolume(safeVolume).toLowerCase());
+    }
+    playNotificationSound(safeVolume);
   }
 
   return (
@@ -262,6 +334,49 @@ export default function NotificationBell() {
               <button onClick={() => setOpen(false)} className="p-2 rounded-ios hover:bg-white text-ios-tertiary transition-colors" title="Close">
                 <X className="w-4 h-4" />
               </button>
+            </div>
+          </div>
+          <div className="px-4 py-2.5 border-b border-ios-separator/20 bg-ios-bg/40 flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2 text-ios-secondary shrink-0">
+              {soundVolume <= 0 ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
+              <span className="text-caption1 font-semibold">Sound</span>
+            </div>
+            <div className="min-w-0 flex-1 max-w-[220px]">
+              <div className="flex items-center gap-2">
+                <input
+                  type="range"
+                  min="0"
+                  max="100"
+                  step="5"
+                  value={soundVolume}
+                  onChange={e => setSoundVolume(Number(e.target.value))}
+                  onMouseUp={e => updateSoundVolume(e.currentTarget.value)}
+                  onTouchEnd={e => updateSoundVolume(e.currentTarget.value)}
+                  className="w-full accent-[#007AFF]"
+                  aria-label="Notification sound volume"
+                />
+                <button
+                  onClick={() => updateSoundVolume(soundVolume <= 0 ? 70 : 0)}
+                  className={`px-2.5 py-1 rounded-ios-sm text-caption2 font-semibold border transition-all ${
+                    soundVolume <= 0
+                      ? 'bg-ios-blue text-white border-ios-blue'
+                      : 'bg-white text-ios-secondary border-ios-separator/40 hover:bg-ios-fill'
+                  }`}
+                >
+                  {soundVolume <= 0 ? 'Muted' : `${soundVolume}%`}
+                </button>
+              </div>
+              <div className="mt-1 flex items-center justify-between text-[10px] font-semibold text-ios-tertiary">
+                {SOUND_MARKS.map(mark => (
+                  <button
+                    key={mark.value}
+                    onClick={() => updateSoundVolume(mark.value)}
+                    className={`transition-colors ${Math.abs(soundVolume - mark.value) < 5 ? 'text-ios-blue' : 'hover:text-ios-primary'}`}
+                  >
+                    {mark.label}
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
           <div className="max-h-[70vh] overflow-y-auto p-2 bg-ios-bg/70">

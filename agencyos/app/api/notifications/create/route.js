@@ -4,7 +4,15 @@ import { createClient } from '@supabase/supabase-js';
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_KEY;
 const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-const ALLOWED_TYPES = new Set(['invoice_due', 'task_assigned', 'project_assigned', 'comment_mention', 'broadcast']);
+const ALLOWED_TYPES = new Set([
+  'invoice_due',
+  'task_assigned',
+  'project_assigned',
+  'comment_mention',
+  'broadcast',
+  'task_reminder',
+  'approval_request',
+]);
 
 function unauthorized(message = 'Unauthorized') {
   return NextResponse.json({ error: message }, { status: 401 });

@@ -119,7 +119,22 @@ ALTER TABLE projects
   ADD COLUMN IF NOT EXISTS hourly_rate DECIMAL(10,2);
 
 ALTER TABLE tasks
-  ADD COLUMN IF NOT EXISTS task_type TEXT DEFAULT 'general';
+  ADD COLUMN IF NOT EXISTS task_type TEXT DEFAULT 'general',
+  ADD COLUMN IF NOT EXISTS reminder_at TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS recurrence_type TEXT DEFAULT 'none',
+  ADD COLUMN IF NOT EXISTS recurrence_interval INTEGER DEFAULT 1,
+  ADD COLUMN IF NOT EXISTS recurrence_weekdays SMALLINT[],
+  ADD COLUMN IF NOT EXISTS recurrence_daily_mode TEXT DEFAULT 'interval',
+  ADD COLUMN IF NOT EXISTS recurrence_end_type TEXT DEFAULT 'never',
+  ADD COLUMN IF NOT EXISTS recurrence_until DATE,
+  ADD COLUMN IF NOT EXISTS recurrence_monthly_mode TEXT DEFAULT 'day_of_month',
+  ADD COLUMN IF NOT EXISTS recurrence_monthly_week TEXT,
+  ADD COLUMN IF NOT EXISTS recurrence_monthly_weekday SMALLINT,
+  ADD COLUMN IF NOT EXISTS recurrence_generated_task_id UUID REFERENCES tasks(id) ON DELETE SET NULL,
+  ADD COLUMN IF NOT EXISTS recurrence_origin_task_id UUID REFERENCES tasks(id) ON DELETE SET NULL;
+
+CREATE INDEX IF NOT EXISTS idx_tasks_reminder_at ON tasks(reminder_at);
+CREATE INDEX IF NOT EXISTS idx_tasks_recurrence_origin_task_id ON tasks(recurrence_origin_task_id);
 
 ALTER TABLE profiles
   ADD COLUMN IF NOT EXISTS approval_status TEXT DEFAULT 'approved',
