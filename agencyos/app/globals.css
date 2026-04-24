@@ -82,3 +82,395 @@ body {
   letter-spacing: 0.04em;
   padding: 0 16px 8px;
 }
+
+@keyframes team-moment-enter {
+  from {
+    opacity: 0;
+    transform: translateY(-14px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes team-moment-breathe {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-4px);
+  }
+}
+
+@keyframes team-moment-line-drift {
+  0%, 100% {
+    transform: translateX(0);
+    opacity: 0.7;
+  }
+  50% {
+    transform: translateX(4px);
+    opacity: 1;
+  }
+}
+
+@keyframes team-moment-sticker-float {
+  0%, 100% {
+    transform: translateY(0) rotate(-5deg);
+  }
+  50% {
+    transform: translateY(-7px) rotate(4deg);
+  }
+}
+
+@keyframes team-moment-pop {
+  0% {
+    transform: scale(0.92);
+    opacity: 0;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+@keyframes team-moment-burst-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(12deg);
+  }
+}
+
+@keyframes team-moment-sparkle-drift {
+  0%, 100% {
+    transform: translateY(0) scale(1);
+    opacity: 0.85;
+  }
+  50% {
+    transform: translateY(-6px) scale(1.06);
+    opacity: 1;
+  }
+}
+
+@keyframes team-moment-bulldog-thump {
+  0%, 100% {
+    transform: translateY(0) rotate(-2deg);
+  }
+  20% {
+    transform: translateX(-3px) translateY(2px) rotate(-4deg);
+  }
+  42% {
+    transform: translateY(-4px) rotate(1deg);
+  }
+}
+
+@keyframes team-moment-lion-burst {
+  0%, 100% {
+    transform: scale(1);
+  }
+  25% {
+    transform: scale(1.08);
+  }
+  50% {
+    transform: scale(1.02);
+  }
+}
+
+@keyframes team-moment-kitten-hop {
+  0%, 100% {
+    transform: translateY(0) rotate(-6deg);
+  }
+  35% {
+    transform: translateY(-10px) rotate(3deg);
+  }
+  70% {
+    transform: translateY(-2px) rotate(-1deg);
+  }
+}
+
+@keyframes team-moment-owl-watch {
+  0%, 100% {
+    transform: translateY(0) rotate(0deg);
+  }
+  30% {
+    transform: translateY(-3px) rotate(-3deg);
+  }
+  60% {
+    transform: translateY(-1px) rotate(3deg);
+  }
+}
+
+.team-moment-enter {
+  animation: team-moment-enter 220ms ease-out, team-moment-breathe 4.8s ease-in-out infinite 240ms;
+}
+
+.team-moment-scene {
+  position: relative;
+}
+
+.team-moment-layout {
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  gap: 6px;
+  align-items: center;
+}
+
+.team-moment-sticker-cluster {
+  position: relative;
+  min-height: 200px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.team-moment-animal-wrap {
+  position: relative;
+  width: 168px;
+  height: 168px;
+  border-radius: 9999px;
+  border: 2px solid rgba(255,255,255,0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 18px 42px rgba(28, 28, 30, 0.16);
+  backdrop-filter: blur(12px);
+  animation: team-moment-pop 260ms ease-out;
+}
+
+.team-moment-animal-shadow {
+  position: absolute;
+  inset: 22px;
+  border-radius: 9999px;
+  filter: blur(18px);
+  opacity: 0.9;
+}
+
+.team-moment-animal {
+  position: relative;
+  font-size: 92px;
+  line-height: 1;
+  filter: drop-shadow(0 16px 22px rgba(28, 28, 30, 0.18));
+  animation: team-moment-sticker-float 3.3s ease-in-out infinite;
+}
+
+.team-moment-burst {
+  position: absolute;
+  width: 212px;
+  height: 212px;
+  opacity: 0.3;
+  animation: team-moment-burst-spin 5.5s ease-in-out infinite alternate;
+}
+
+.team-moment-burst::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 9999px;
+  background:
+    radial-gradient(circle at center, transparent 36%, currentColor 37%, currentColor 39%, transparent 40%),
+    repeating-conic-gradient(from 0deg, currentColor 0deg 8deg, transparent 8deg 28deg);
+  mask:
+    radial-gradient(circle at center, transparent 0 48px, #000 50px);
+}
+
+.team-moment-word {
+  position: absolute;
+  display: inline-flex;
+  align-items: center;
+  padding: 8px 12px;
+  border-radius: 9999px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  line-height: 1;
+  box-shadow: 0 12px 24px rgba(28, 28, 30, 0.08);
+  animation: team-moment-sticker-float 3.3s ease-in-out infinite;
+}
+
+.team-moment-word-a {
+  top: 22px;
+  left: 8px;
+}
+
+.team-moment-word-b {
+  right: 6px;
+  bottom: 28px;
+  animation-delay: 0.45s;
+}
+
+.team-moment-sparks {
+  position: absolute;
+  right: 18px;
+  top: 44px;
+  display: flex;
+  gap: 8px;
+}
+
+.team-moment-sparks svg {
+  animation: team-moment-sparkle-drift 2.6s ease-in-out infinite;
+}
+
+.team-moment-sparks svg:last-child {
+  animation-delay: 0.35s;
+}
+
+.team-moment-copy {
+  min-width: 0;
+  padding-right: 18px;
+}
+
+.team-moment-from {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border-radius: 9999px;
+  background: rgba(255,255,255,0.92);
+  padding: 8px 12px;
+  box-shadow: 0 12px 26px rgba(28, 28, 30, 0.08);
+  font-size: 12px;
+  font-weight: 700;
+  color: #1C1C1E;
+}
+
+.team-moment-from-avatar {
+  width: 20px;
+  height: 20px;
+  border-radius: 9999px;
+  background: #1C1C1E;
+  color: white;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.team-moment-mini-tag {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 9999px;
+  padding: 7px 11px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.team-moment-title-lines {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  max-width: 100%;
+}
+
+.team-moment-title {
+  display: inline;
+  font-size: clamp(28px, 3vw, 42px);
+  line-height: 1.02;
+  font-weight: 900;
+  color: #111111;
+  text-shadow: 0 8px 22px rgba(255,255,255,0.72);
+}
+
+.team-moment-body {
+  display: inline;
+  font-size: 16px;
+  line-height: 1.35;
+  font-weight: 600;
+  color: #3A3A3C;
+  text-shadow: 0 6px 18px rgba(255,255,255,0.7);
+}
+
+.team-moment-style-motivation .team-moment-animal {
+  animation: team-moment-bulldog-thump 2.6s ease-in-out infinite;
+}
+
+.team-moment-style-motivation .team-moment-word {
+  animation-duration: 2.9s;
+}
+
+.team-moment-style-win .team-moment-animal {
+  animation: team-moment-lion-burst 2.8s ease-in-out infinite;
+}
+
+.team-moment-style-win .team-moment-burst {
+  opacity: 0.4;
+  transform-origin: center;
+}
+
+.team-moment-style-fun .team-moment-animal {
+  animation: team-moment-kitten-hop 2.3s ease-in-out infinite;
+}
+
+.team-moment-style-fun .team-moment-word-a {
+  top: 14px;
+}
+
+.team-moment-style-fun .team-moment-word-b {
+  right: -4px;
+  bottom: 18px;
+}
+
+.team-moment-style-focus .team-moment-animal {
+  animation: team-moment-owl-watch 3.3s ease-in-out infinite;
+}
+
+.team-moment-style-focus .team-moment-burst {
+  opacity: 0.2;
+}
+
+@media (max-width: 860px) {
+  .team-moment-layout {
+    grid-template-columns: 190px minmax(0, 1fr);
+  }
+
+  .team-moment-animal-wrap {
+    width: 142px;
+    height: 142px;
+  }
+
+  .team-moment-animal {
+    font-size: 78px;
+  }
+
+  .team-moment-title {
+    font-size: clamp(24px, 4.5vw, 34px);
+  }
+}
+
+@media (max-width: 640px) {
+  .team-moment-layout {
+    grid-template-columns: 1fr;
+    gap: 2px;
+  }
+
+  .team-moment-sticker-cluster {
+    min-height: 150px;
+  }
+
+  .team-moment-animal-wrap {
+    width: 128px;
+    height: 128px;
+  }
+
+  .team-moment-animal {
+    font-size: 70px;
+  }
+
+  .team-moment-copy {
+    padding-right: 6px;
+  }
+
+  .team-moment-title {
+    font-size: 24px;
+    padding: 10px 12px;
+  }
+
+  .team-moment-body {
+    font-size: 14px;
+    padding: 9px 12px;
+  }
+}

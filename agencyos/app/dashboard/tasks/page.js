@@ -8,6 +8,7 @@ import { useRole } from '@/lib/useRole';
 import { useTimer } from '@/lib/timerContext';
 import { getProjectAccess, grantProjectAccess } from '@/lib/projectAccess';
 import { createTaskAssignedNotification, createCommentMentionNotification, findMentionedUsers } from '@/lib/notifications';
+import { emitMomentProgress } from '@/lib/teamMoments';
 import { useSearchParams } from 'next/navigation';
 import {
   Plus, Search, ChevronDown, ArrowLeft, MessageSquare,
@@ -1134,6 +1135,9 @@ export default function TasksPage() {
     const newStatus = task.status==='done' ? 'todo' : 'done';
     await supabase.from('tasks').update({ status: newStatus }).eq('id', task.id);
     setTasks(p => p.map(t => t.id===task.id ? { ...t, status: newStatus } : t));
+    if (newStatus === 'done') {
+      emitMomentProgress({ source: 'task_done', taskId: task.id });
+    }
   }
 
   async function deleteTask(taskId) {

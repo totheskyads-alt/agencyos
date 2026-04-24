@@ -2,6 +2,7 @@
 import { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
 import { getElapsed, parseUTC } from '@/lib/utils';
+import { emitMomentProgress } from '@/lib/teamMoments';
 
 const TimerContext = createContext(null);
 
@@ -142,6 +143,13 @@ export function TimerProvider({ children }) {
         .eq('id', cur.id)
         .select('*, projects(name,color), tasks(title)').single();
       setStoppedEntry(stopped || cur);
+      if (dur >= 1500) {
+        emitMomentProgress({
+          source: 'timer_stop',
+          taskId: cur.task_id || null,
+          durationSeconds: dur,
+        });
+      }
       setActiveTimer(null); setElapsed(0);
       setIsPaused(false); setPausedAt(null); setPauseSeconds(0);
     } finally {

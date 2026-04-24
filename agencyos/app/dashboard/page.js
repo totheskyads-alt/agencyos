@@ -4,8 +4,10 @@ import { supabase } from '@/lib/supabase';
 import { fmtDuration } from '@/lib/utils';
 import { getProjectAccess, visibleClientIdsFromProjects } from '@/lib/projectAccess';
 import { ensureBillingReminderNotifications } from '@/lib/notifications';
+import Modal from '@/components/Modal';
+import { MOMENT_STYLES } from '@/components/TeamMomentOverlay';
 import Link from 'next/link';
-import { ArrowRight, Clock } from 'lucide-react';
+import { ArrowRight, Clock, Plus, Sparkles } from 'lucide-react';
 
 function greeting() {
   const h = new Date().getHours();
@@ -54,6 +56,8 @@ function DonutChart({ data, total, size = 120 }) {
 
 export default function DashboardPage() {
   const [profile, setProfile] = useState(null);
+  const [role, setRole] = useState('operator');
+  const [currentUserId, setCurrentUserId] = useState(null);
   const [todaySecs, setTodaySecs] = useState(0);
   const [weekSecs, setWeekSecs] = useState(0);
   const [monthSecs, setMonthSecs] = useState(0);
@@ -64,6 +68,15 @@ export default function DashboardPage() {
   const [todayByProject, setTodayByProject] = useState([]);
   const [todayTotal, setTodayTotal] = useState(0);
   const [weekByProject, setWeekByProject] = useState([]);
+  const [composerOpen, setComposerOpen] = useState(false);
+  const [momentSaving, setMomentSaving] = useState(false);
+  const [momentFeedback, setMomentFeedback] = useState('');
+  const [momentForm, setMomentForm] = useState({
+    title: '',
+    body: '',
+    style: 'motivation',
+    endsAt: '',
+  });
 
   useEffect(() => { load(); }, []);
 
@@ -72,6 +85,8 @@ export default function DashboardPage() {
     const user = accessInfo.user;
     if (!user) return;
     setProfile(accessInfo.profile || null);
+    setRole(accessInfo.role || 'operator');
+    setCurrentUserId(user.id);
     if (accessInfo.role === 'admin') await ensureBillingReminderNotifications(user.id);
 
     const now = new Date();
@@ -155,6 +170,42 @@ export default function DashboardPage() {
     setWeekByProject(Object.values(byPW).sort((a,b)=>b.secs-a.secs).slice(0,5));
   }
 
+  async function createMoment() {
+    const title = momentForm.title.trim();
+    const body = momentForm.body.trim();
+    if (!title) {
+      setMomentFeedback('Give the moment a short headline first.');
+      return;
+    }
+
+    setMomentSaving(true);
+    setMomentFeedback('');
+
+    const payload = {
+      title,
+      body: body || null,
+      style: momentForm.style,
+      is_active: true,
+      starts_at: new Date().toISOString(),
+      ends_at: momentForm.endsAt ? new Date(momentForm.endsAt).toISOString() : null,
+      created_by: currentUserId,
+    };
+
+    const { error } = await supabase.from('team_moments').insert(payload);
+    setMomentSaving(false);
+
+    if (error) {
+      setMomentFeedback('Moment could not be saved yet. Run the SQL for team moments first, then try again.');
+      return;
+    }
+
+    setComposerOpen(false);
+    setMomentForm({ title: '', body: '', style: 'motivation', endsAt: '' });
+    if (typeof window !== 'undefined') {
+      window.location.reload();
+    }
+  }
+
   const dayOfWeek = new Date().toLocaleDateString('en-US', { weekday:'long', day:'numeric', month:'long' });
 
   return (
@@ -174,7 +225,19 @@ export default function DashboardPage() {
             <p className="text-footnote text-ios-secondary">{dayOfWeek}</p>
           </div>
         </div>
-        <div className="flex gap-3">
+        <div className="flex gap-3 items-center">
+          {role === 'admin' && (
+            <button
+              onClick={() => {
+                setMomentFeedback('');
+                setComposerOpen(true);
+              }}
+              className="hidden md:inline-flex h-11 px-4 rounded-ios-lg border border-ios-separator/60 bg-white text-ios-primary shadow-ios-sm items-center gap-2 font-semibold transition-all hover:-translate-y-0.5 hover:shadow-ios"
+            >
+              <Sparkles className="w-4 h-4 text-ios-blue" />
+              New moment
+            </button>
+          )}
           <Link href="/dashboard/clients" className="card px-4 py-3 text-center hover:shadow-ios-lg transition-shadow">
             <p className="text-headline font-bold text-ios-orange">{clientCount}</p>
             <p className="text-caption2 text-ios-secondary">Clients</p>
@@ -189,6 +252,26 @@ export default function DashboardPage() {
           </Link>
         </div>
       </div>
+
+      {role === 'admin' && (
+        <div className="md:hidden">
+          <button
+            onClick={() => {
+              setMomentFeedback('');
+              setComposerOpen(true);
+            }}
+            className="w-full rounded-ios-lg border border-ios-separator/60 bg-white px-4 py-3 text-left shadow-ios-sm flex items-center justify-between"
+          >
+            <div>
+              <p className="text-subhead font-semibold text-ios-primary">Send a motivation moment</p>
+              <p className="text-caption1 text-ios-secondary">Show a short boost the next time people open the dashboard.</p>
+            </div>
+            <div className="w-10 h-10 rounded-full bg-blue-50 text-ios-blue flex items-center justify-center shrink-0">
+              <Plus className="w-5 h-5" />
+            </div>
+          </button>
+        </div>
+      )}
 
       {/* Main 2-col grid */}
       <div className="grid lg:grid-cols-2 gap-4">
@@ -269,6 +352,96 @@ export default function DashboardPage() {
           ))}
         </div>
       </div>
+
+      {composerOpen && (
+        <Modal title="New motivation moment" onClose={() => setComposerOpen(false)} size="lg">
+          <div className="space-y-5">
+            <div className="grid md:grid-cols-2 gap-4">
+              <div>
+                <label className="input-label">Headline</label>
+              <input
+                  value={momentForm.title}
+                  onChange={(e) => setMomentForm((prev) => ({ ...prev, title: e.target.value }))}
+                  className="input"
+                  placeholder="No sleepy energy today. We move."
+                  maxLength={90}
+                />
+              </div>
+              <div>
+                <label className="input-label">Visible until</label>
+                <input
+                  type="datetime-local"
+                  value={momentForm.endsAt}
+                  onChange={(e) => setMomentForm((prev) => ({ ...prev, endsAt: e.target.value }))}
+                  className="input"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="input-label">Message</label>
+              <textarea
+                value={momentForm.body}
+                onChange={(e) => setMomentForm((prev) => ({ ...prev, body: e.target.value }))}
+                className="input min-h-[120px] resize-none"
+                placeholder="Short, warm, bold. Think: one good line that makes people smirk and move."
+                maxLength={220}
+              />
+            </div>
+
+            <div>
+              <label className="input-label">Style</label>
+              <div className="grid sm:grid-cols-2 gap-3">
+                {Object.entries(MOMENT_STYLES).map(([value, style]) => {
+                  const selected = momentForm.style === value;
+                  return (
+                    <button
+                      key={value}
+                      type="button"
+                      onClick={() => setMomentForm((prev) => ({ ...prev, style: value }))}
+                      className={`rounded-ios-lg border px-4 py-4 text-left transition-all ${selected ? 'border-ios-blue bg-blue-50 shadow-ios-sm' : 'border-ios-separator/60 bg-white hover:border-ios-blue/30'}`}
+                    >
+                      <div className="flex items-start gap-3">
+                        <div
+                          className="w-12 h-12 rounded-full flex items-center justify-center shrink-0 text-2xl shadow-ios-sm"
+                          style={{ background: style.soft, border: `1px solid ${style.accent}33` }}
+                        >
+                          <span aria-hidden="true">{style.animal}</span>
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-subhead font-semibold text-ios-primary capitalize">{value}</p>
+                          <p className="text-caption1 text-ios-secondary mt-1">{style.words.join(' • ')}</p>
+                        </div>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="rounded-ios-lg bg-ios-bg px-4 py-3 border border-ios-separator/40">
+              <p className="text-caption1 text-ios-secondary">
+                V1 logic: it appears while people are actually inside the platform, floats above every dashboard page, updates live for other logged-in users, auto-hides after a few seconds, and can be dismissed manually.
+              </p>
+            </div>
+
+            {momentFeedback && (
+              <div className="rounded-ios-lg border border-red-200 bg-red-50 px-4 py-3 text-subhead text-ios-red">
+                {momentFeedback}
+              </div>
+            )}
+
+            <div className="flex justify-end gap-3 pt-1">
+              <button onClick={() => setComposerOpen(false)} className="btn-secondary">
+                Cancel
+              </button>
+              <button onClick={createMoment} disabled={momentSaving} className="btn-primary">
+                {momentSaving ? 'Saving...' : 'Send moment'}
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }

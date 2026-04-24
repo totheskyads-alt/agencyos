@@ -6,6 +6,7 @@ import { supabase } from '@/lib/supabase';
 import Sidebar from '@/components/Sidebar';
 import GlobalTimer from '@/components/GlobalTimer';
 import NotificationBell from '@/components/NotificationBell';
+import TeamMomentOverlay from '@/components/TeamMomentOverlay';
 import { TimerProvider } from '@/lib/timerContext';
 import { Clock3, LogOut, Menu, ShieldAlert, X } from 'lucide-react';
 
@@ -89,6 +90,7 @@ export default function DashboardLayout({ children }) {
     <TimerProvider>
       <div className="flex min-h-screen bg-ios-bg">
         <Sidebar user={user} profile={profile} open={mobileNavOpen} setOpen={setMobileNavOpen} />
+        <TeamMomentOverlay userId={user?.id} />
 
         <header className="fixed top-0 left-0 right-0 lg:left-60 z-40 h-16 bg-white/90 backdrop-blur-ios border-b border-ios-separator/40">
           <div className="h-full px-4 lg:px-6 flex items-center justify-between gap-4">

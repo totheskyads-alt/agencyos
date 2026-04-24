@@ -195,5 +195,148 @@ CREATE TRIGGER on_auth_user_created
   AFTER INSERT ON auth.users
   FOR EACH ROW EXECUTE PROCEDURE handle_new_user();
 
+-- Team moments: lightweight motivational messages shown in-app
+CREATE TABLE IF NOT EXISTS team_moments (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  title TEXT NOT NULL,
+  body TEXT,
+  style TEXT DEFAULT 'motivation',
+  is_active BOOLEAN DEFAULT TRUE,
+  starts_at TIMESTAMPTZ DEFAULT NOW(),
+  ends_at TIMESTAMPTZ,
+  created_by UUID REFERENCES profiles(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_team_moments_active ON team_moments(is_active, starts_at DESC);
+
+GRANT SELECT ON team_moments TO authenticated;
+GRANT INSERT, UPDATE, DELETE ON team_moments TO authenticated;
+
+ALTER TABLE team_moments ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "team_moments_select_current" ON team_moments;
+CREATE POLICY "team_moments_select_current" ON team_moments
+  FOR SELECT
+  USING (
+    is_active = TRUE
+    AND (starts_at IS NULL OR starts_at <= NOW())
+    AND (ends_at IS NULL OR ends_at >= NOW())
+  );
+
+DROP POLICY IF EXISTS "team_moments_admin_insert" ON team_moments;
+CREATE POLICY "team_moments_admin_insert" ON team_moments
+  FOR INSERT
+  WITH CHECK (
+    EXISTS (
+      SELECT 1 FROM profiles
+      WHERE profiles.id = auth.uid()
+        AND profiles.role = 'admin'
+        AND COALESCE(profiles.is_deleted, FALSE) = FALSE
+    )
+  );
+
+DROP POLICY IF EXISTS "team_moments_admin_update" ON team_moments;
+CREATE POLICY "team_moments_admin_update" ON team_moments
+  FOR UPDATE
+  USING (
+    EXISTS (
+      SELECT 1 FROM profiles
+      WHERE profiles.id = auth.uid()
+        AND profiles.role = 'admin'
+        AND COALESCE(profiles.is_deleted, FALSE) = FALSE
+    )
+  )
+  WITH CHECK (
+    EXISTS (
+      SELECT 1 FROM profiles
+      WHERE profiles.id = auth.uid()
+        AND profiles.role = 'admin'
+        AND COALESCE(profiles.is_deleted, FALSE) = FALSE
+    )
+  );
+
+DROP POLICY IF EXISTS "team_moments_admin_delete" ON team_moments;
+CREATE POLICY "team_moments_admin_delete" ON team_moments
+  FOR DELETE
+  USING (
+    EXISTS (
+      SELECT 1 FROM profiles
+      WHERE profiles.id = auth.uid()
+        AND profiles.role = 'admin'
+        AND COALESCE(profiles.is_deleted, FALSE) = FALSE
+    )
+  );
+
+CREATE TABLE IF NOT EXISTS team_moment_deliveries (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  team_moment_id UUID REFERENCES team_moments(id) ON DELETE CASCADE,
+  delivery_kind TEXT NOT NULL DEFAULT 'manual',
+  trigger_type TEXT NOT NULL DEFAULT 'manual',
+  style TEXT,
+  title TEXT NOT NULL,
+  body TEXT,
+  delivery_date DATE DEFAULT CURRENT_DATE,
+  shown_at TIMESTAMPTZ DEFAULT NOW(),
+  dismissed_at TIMESTAMPTZ,
+  event_key TEXT UNIQUE
+);
+
+CREATE INDEX IF NOT EXISTS idx_team_moment_deliveries_user_day
+  ON team_moment_deliveries(user_id, delivery_date DESC, shown_at DESC);
+
+GRANT SELECT, INSERT, UPDATE ON team_moment_deliveries TO authenticated;
+
+ALTER TABLE team_moment_deliveries ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "team_moment_deliveries_select_own_or_admin" ON team_moment_deliveries;
+CREATE POLICY "team_moment_deliveries_select_own_or_admin" ON team_moment_deliveries
+  FOR SELECT
+  USING (
+    user_id = auth.uid()
+    OR EXISTS (
+      SELECT 1 FROM profiles
+      WHERE profiles.id = auth.uid()
+        AND profiles.role = 'admin'
+        AND COALESCE(profiles.is_deleted, FALSE) = FALSE
+    )
+  );
+
+DROP POLICY IF EXISTS "team_moment_deliveries_insert_own_or_admin" ON team_moment_deliveries;
+CREATE POLICY "team_moment_deliveries_insert_own_or_admin" ON team_moment_deliveries
+  FOR INSERT
+  WITH CHECK (
+    user_id = auth.uid()
+    OR EXISTS (
+      SELECT 1 FROM profiles
+      WHERE profiles.id = auth.uid()
+        AND profiles.role = 'admin'
+        AND COALESCE(profiles.is_deleted, FALSE) = FALSE
+    )
+  );
+
+DROP POLICY IF EXISTS "team_moment_deliveries_update_own_or_admin" ON team_moment_deliveries;
+CREATE POLICY "team_moment_deliveries_update_own_or_admin" ON team_moment_deliveries
+  FOR UPDATE
+  USING (
+    user_id = auth.uid()
+    OR EXISTS (
+      SELECT 1 FROM profiles
+      WHERE profiles.id = auth.uid()
+        AND profiles.role = 'admin'
+        AND COALESCE(profiles.is_deleted, FALSE) = FALSE
+    )
+  )
+  WITH CHECK (
+    user_id = auth.uid()
+    OR EXISTS (
+      SELECT 1 FROM profiles
+      WHERE profiles.id = auth.uid()
+        AND profiles.role = 'admin'
+        AND COALESCE(profiles.is_deleted, FALSE) = FALSE
+    )
+  );
+
 -- Set the first user as admin (optional)
 -- UPDATE profiles SET role = 'admin' WHERE email = 'your-email@gmail.com';
