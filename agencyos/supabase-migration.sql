@@ -353,5 +353,79 @@ CREATE POLICY "team_moment_deliveries_update_own_or_admin" ON team_moment_delive
     )
   );
 
+CREATE TABLE IF NOT EXISTS notes (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  task_id UUID REFERENCES tasks(id) ON DELETE SET NULL,
+  created_by UUID REFERENCES profiles(id) ON DELETE SET NULL,
+  resolved_by UUID REFERENCES profiles(id) ON DELETE SET NULL,
+  title TEXT NOT NULL,
+  body TEXT,
+  status TEXT NOT NULL DEFAULT 'open',
+  color TEXT DEFAULT '#007AFF',
+  tags TEXT[] DEFAULT '{}',
+  reminder_at TIMESTAMPTZ,
+  source TEXT NOT NULL DEFAULT 'text',
+  resolved_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_notes_project_status ON notes(project_id, status, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_notes_creator_reminder ON notes(created_by, reminder_at);
+CREATE INDEX IF NOT EXISTS idx_notes_task ON notes(task_id);
+
+GRANT SELECT, INSERT, UPDATE, DELETE ON notes TO authenticated;
+
+ALTER TABLE notes ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "notes_select_visible_to_project_members" ON notes;
+DROP POLICY IF EXISTS "notes_select_own_only" ON notes;
+CREATE POLICY "notes_select_own_only" ON notes
+  FOR SELECT
+  USING (
+    created_by = auth.uid()
+  );
+
+DROP POLICY IF EXISTS "notes_insert_visible_to_project_members" ON notes;
+DROP POLICY IF EXISTS "notes_insert_own_only" ON notes;
+CREATE POLICY "notes_insert_own_only" ON notes
+  FOR INSERT
+  WITH CHECK (
+    created_by = auth.uid()
+    AND (
+      EXISTS (
+        SELECT 1 FROM profiles
+        WHERE profiles.id = auth.uid()
+          AND profiles.role = 'admin'
+          AND COALESCE(profiles.is_deleted, FALSE) = FALSE
+      )
+      OR EXISTS (
+        SELECT 1 FROM project_members
+        WHERE project_members.project_id = notes.project_id
+          AND project_members.user_id = auth.uid()
+      )
+    )
+  );
+
+DROP POLICY IF EXISTS "notes_update_visible_to_project_members" ON notes;
+DROP POLICY IF EXISTS "notes_update_own_only" ON notes;
+CREATE POLICY "notes_update_own_only" ON notes
+  FOR UPDATE
+  USING (
+    created_by = auth.uid()
+  )
+  WITH CHECK (
+    created_by = auth.uid()
+  );
+
+DROP POLICY IF EXISTS "notes_delete_visible_to_project_members" ON notes;
+DROP POLICY IF EXISTS "notes_delete_own_only" ON notes;
+CREATE POLICY "notes_delete_own_only" ON notes
+  FOR DELETE
+  USING (
+    created_by = auth.uid()
+  );
+
 -- Set the first user as admin (optional)
 -- UPDATE profiles SET role = 'admin' WHERE email = 'your-email@gmail.com';

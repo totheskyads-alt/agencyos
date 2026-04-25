@@ -2,8 +2,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
-import { ensureDueTodayTaskNotifications, ensurePendingApprovalNotifications, ensureTaskReminderNotifications } from '@/lib/notifications';
-import { AtSign, Bell, BellRing, BriefcaseBusiness, CheckCheck, Clock3, MessageCircle, ReceiptText, ShieldAlert, Sparkles, Volume2, VolumeX, X } from 'lucide-react';
+import { ensureDueTodayTaskNotifications, ensureNoteReminderNotifications, ensurePendingApprovalNotifications, ensureTaskReminderNotifications } from '@/lib/notifications';
+import { AtSign, Bell, BellRing, BriefcaseBusiness, CheckCheck, Clock3, MessageCircle, NotebookText, ReceiptText, ShieldAlert, Sparkles, Volume2, VolumeX, X } from 'lucide-react';
 
 const SOUND_MARKS = [
   { value: 0, label: 'Silent' },
@@ -42,6 +42,7 @@ function labelFor(type) {
     comment_mention: 'Mention',
     broadcast: 'Message',
     task_reminder: 'Reminder',
+    note_reminder: 'Notes',
     approval_request: 'Approval',
   }[type] || 'Notice';
 }
@@ -83,6 +84,12 @@ function styleFor(type) {
       bg: 'bg-amber-50',
       text: 'text-amber-600',
       ring: 'ring-amber-100',
+    },
+    note_reminder: {
+      icon: NotebookText,
+      bg: 'bg-green-50',
+      text: 'text-ios-green',
+      ring: 'ring-green-100',
     },
     approval_request: {
       icon: ShieldAlert,
@@ -208,6 +215,7 @@ export default function NotificationBell() {
     await Promise.all([
       ensureDueTodayTaskNotifications(uid),
       ensureTaskReminderNotifications(uid),
+      ensureNoteReminderNotifications(uid),
       currentRole === 'admin' ? ensurePendingApprovalNotifications(uid) : Promise.resolve(),
     ]);
     const { data, error } = await supabase
@@ -255,6 +263,9 @@ export default function NotificationBell() {
     }
     if (notification.type === 'approval_request') {
       return notification.entity_url || '/dashboard/team';
+    }
+    if (notification.type === 'note_reminder') {
+      return notification.entity_url || '/dashboard/notes';
     }
     return notification.entity_url;
   }

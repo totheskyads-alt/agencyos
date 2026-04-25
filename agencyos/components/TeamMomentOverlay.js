@@ -162,12 +162,15 @@ export default function TeamMomentOverlay({ userId }) {
 
     const interval = setInterval(() => hydrateMoment(userId, pathname === '/dashboard' ? 'dashboard_first_open' : null), 30000);
     const onProgress = () => hydrateMoment(userId, 'progress');
+    const onRefresh = () => hydrateMoment(userId, pathname === '/dashboard' ? 'dashboard_first_open' : null, { requireActive: false });
 
     window.addEventListener('sky:moment-progress', onProgress);
+    window.addEventListener('sky:moment-refresh', onRefresh);
 
     return () => {
       clearInterval(interval);
       window.removeEventListener('sky:moment-progress', onProgress);
+      window.removeEventListener('sky:moment-refresh', onRefresh);
       supabase.removeChannel(channel);
     };
   }, [userId, pathname]);

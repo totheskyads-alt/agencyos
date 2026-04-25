@@ -11,6 +11,7 @@ const ALLOWED_TYPES = new Set([
   'comment_mention',
   'broadcast',
   'task_reminder',
+  'note_reminder',
   'approval_request',
 ]);
 

@@ -937,6 +937,14 @@ function TaskDetail({ task, members, boardColumns, projects, labels: allLabels, 
               </button>
             )}
             {task?.id && (
+              <button
+                onClick={() => window.location.assign(`/dashboard/notes?project=${form.project_id || task.project_id || ''}&task=${task.id}&newNote=1`)}
+                className="btn-secondary flex items-center gap-1.5 text-footnote"
+              >
+                <Tag className="w-3.5 h-3.5" /> Notes
+              </button>
+            )}
+            {task?.id && (
               <button onClick={onDelete} className="btn-danger flex items-center gap-1.5 text-footnote">
                 <Trash2 className="w-3.5 h-3.5" /> Delete
               </button>

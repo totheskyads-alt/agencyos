@@ -87,7 +87,11 @@ export default function DashboardPage() {
     setProfile(accessInfo.profile || null);
     setRole(accessInfo.role || 'operator');
     setCurrentUserId(user.id);
-    if (accessInfo.role === 'admin') await ensureBillingReminderNotifications(user.id);
+    if (accessInfo.role === 'admin') {
+      ensureBillingReminderNotifications(user.id).catch((error) => {
+        console.warn('Billing reminder notifications could not be refreshed', error);
+      });
+    }
 
     const now = new Date();
     const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
@@ -203,9 +207,10 @@ export default function DashboardPage() {
     }
 
     setComposerOpen(false);
+    setMomentFeedback('');
     setMomentForm({ title: '', body: '', style: 'motivation', endsAt: '' });
     if (typeof window !== 'undefined') {
-      window.location.reload();
+      window.dispatchEvent(new CustomEvent('sky:moment-refresh'));
     }
   }
 

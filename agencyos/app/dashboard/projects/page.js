@@ -308,6 +308,10 @@ export default function ProjectsPage() {
                         className="flex items-center gap-1 px-2.5 py-1.5 rounded-ios bg-ios-fill text-ios-secondary text-caption1 font-semibold hover:bg-ios-fill2">
                         View tasks →
                       </a>
+                      <a href={`/dashboard/notes?project=${p.id}`} onClick={e => e.stopPropagation()}
+                        className="flex items-center gap-1 px-2.5 py-1.5 rounded-ios bg-blue-50 text-ios-blue text-caption1 font-semibold hover:bg-blue-100">
+                        Notes →
+                      </a>
                       {canManageProjects && (
                         <button onClick={e => toggleArchive(p, e)}
                           className={`flex items-center gap-1 px-2.5 py-1.5 rounded-ios text-caption1 font-semibold ${p.status==='active' ? 'bg-ios-fill text-ios-secondary hover:bg-ios-fill2' : 'bg-blue-50 text-ios-blue hover:bg-blue-100'}`}>

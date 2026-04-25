@@ -257,6 +257,35 @@ export async function ensureTaskReminderNotifications(userId) {
   })));
 }
 
+export async function ensureNoteReminderNotifications(userId) {
+  if (!userId) return;
+
+  const nowIso = new Date().toISOString();
+  const { data: notes, error } = await supabase
+    .from('notes')
+    .select('id,title,project_id,task_id,reminder_at')
+    .eq('created_by', userId)
+    .not('reminder_at', 'is', null)
+    .lte('reminder_at', nowIso)
+    .eq('status', 'open');
+
+  if (error) {
+    console.warn('Note reminders could not be loaded', error);
+    return;
+  }
+
+  await Promise.all((notes || []).map(note => createNotification({
+    userId,
+    type: 'note_reminder',
+    title: 'Note reminder',
+    body: note.title || 'One of your notes needs attention.',
+    entityType: 'note',
+    entityId: note.id,
+    entityUrl: `/dashboard/notes?note=${note.id}${note.project_id ? `&project=${note.project_id}` : ''}${note.task_id ? `&task=${note.task_id}` : ''}`,
+    eventKey: `note_reminder:${note.id}:${note.reminder_at}:${userId}`,
+  })));
+}
+
 export async function ensurePendingApprovalNotifications(adminUserId) {
   if (!adminUserId) return;
 
