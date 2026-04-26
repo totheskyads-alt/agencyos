@@ -94,6 +94,7 @@ export default function NotesPage() {
   const editorRef = useRef(null);
   const [notes, setNotes] = useState([]);
   const [projects, setProjects] = useState([]);
+  const [labelLibrary, setLabelLibrary] = useState([]);
   const [search, setSearch] = useState('');
   const [projectFilter, setProjectFilter] = useState(params.get('project') || '');
   const [taskFilter, setTaskFilter] = useState(params.get('task') || '');
@@ -114,6 +115,21 @@ export default function NotesPage() {
   useEffect(() => {
     load();
   }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !profileId) return;
+    try {
+      const stored = JSON.parse(window.localStorage.getItem(`sm_notes_labels:${profileId}`) || '[]');
+      if (Array.isArray(stored)) {
+        setLabelLibrary(stored.filter(Boolean));
+      }
+    } catch {}
+  }, [profileId]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !profileId) return;
+    window.localStorage.setItem(`sm_notes_labels:${profileId}`, JSON.stringify(labelLibrary));
+  }, [labelLibrary, profileId]);
 
   useEffect(() => {
     if (!modalOpen || !editorRef.current) return;
@@ -159,6 +175,15 @@ export default function NotesPage() {
     const [{ data: projectData }, { data: noteData }] = await Promise.all([projectQuery, noteQuery]);
     setProjects(projectData || []);
     setNotes(noteData || []);
+    setLabelLibrary(prev => {
+      const merged = new Set(prev);
+      (noteData || []).forEach(note => {
+        tagArray(note.tags).forEach(tag => {
+          if (tag) merged.add(tag);
+        });
+      });
+      return Array.from(merged).sort((a, b) => a.localeCompare(b));
+    });
     const noteId = params.get('note');
     const shouldOpen = params.get('newNote') === '1';
     if (noteId && noteData?.length) {
@@ -204,6 +229,7 @@ export default function NotesPage() {
   function addTag(raw) {
     const next = raw.trim().replace(/^#/, '');
     if (!next) return;
+    setLabelLibrary(prev => prev.includes(next) ? prev : [...prev, next].sort((a, b) => a.localeCompare(b)));
     setForm(prev => prev.tags.includes(next) ? prev : { ...prev, tags: [...prev.tags, next] });
     setTagInput('');
   }
@@ -212,7 +238,13 @@ export default function NotesPage() {
     setForm(prev => ({ ...prev, tags: prev.tags.filter(item => item !== tag) }));
   }
 
+  function deleteLabel(label) {
+    setLabelLibrary(prev => prev.filter(item => item !== label));
+    setForm(prev => ({ ...prev, tags: prev.tags.filter(item => item !== label) }));
+  }
+
   function toggleLabel(label) {
+    setLabelLibrary(prev => prev.includes(label) ? prev : [...prev, label].sort((a, b) => a.localeCompare(b)));
     setForm(prev => prev.tags.includes(label)
       ? { ...prev, tags: prev.tags.filter(item => item !== label) }
       : { ...prev, tags: [...prev.tags, label] }
@@ -339,6 +371,9 @@ export default function NotesPage() {
   }, [projects, projectSearch]);
   const labelOptions = useMemo(() => {
     const unique = new Set();
+    labelLibrary.forEach(label => {
+      if (label) unique.add(label);
+    });
     notes.forEach(note => {
       tagArray(note.tags).forEach(tag => {
         if (tag) unique.add(tag);
@@ -348,7 +383,7 @@ export default function NotesPage() {
       if (tag) unique.add(tag);
     });
     return Array.from(unique).sort((a, b) => a.localeCompare(b));
-  }, [notes, form.tags]);
+  }, [labelLibrary, notes, form.tags]);
   const filteredLabelOptions = useMemo(() => {
     const needle = labelSearch.trim().toLowerCase();
     if (!needle) return labelOptions;
@@ -608,18 +643,30 @@ export default function NotesPage() {
                         />
                       </div>
                       {filteredLabelOptions.map(label => (
-                        <button
+                        <div
                           key={label}
-                          type="button"
-                          onClick={() => toggleLabel(label)}
-                          className="flex items-center justify-between w-full px-3 py-2.5 text-left hover:bg-ios-fill"
+                          className="flex items-center justify-between gap-2 px-3 py-2.5 hover:bg-ios-fill"
                         >
-                          <span className="flex items-center gap-2 min-w-0">
-                            <span className="w-3 h-3 rounded-full shrink-0" style={{ background: form.color || '#007AFF' }} />
-                            <span className="text-subhead text-ios-primary truncate">{label}</span>
-                          </span>
-                          {form.tags.includes(label) && <Check className="w-4 h-4 text-ios-blue shrink-0" />}
-                        </button>
+                          <button
+                            type="button"
+                            onClick={() => toggleLabel(label)}
+                            className="flex items-center justify-between gap-2 min-w-0 flex-1 text-left"
+                          >
+                            <span className="flex items-center gap-2 min-w-0">
+                              <span className="w-3 h-3 rounded-full shrink-0" style={{ background: form.color || '#007AFF' }} />
+                              <span className="text-subhead text-ios-primary truncate">{label}</span>
+                            </span>
+                            {form.tags.includes(label) && <Check className="w-4 h-4 text-ios-blue shrink-0" />}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => deleteLabel(label)}
+                            className="p-1 rounded-md text-ios-tertiary hover:text-ios-red hover:bg-red-50 shrink-0"
+                            title={`Delete label ${label}`}
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
                       ))}
                       {labelSearch.trim() && !labelOptions.some(label => label.toLowerCase() === labelSearch.trim().toLowerCase()) && (
                         <button
@@ -639,15 +686,15 @@ export default function NotesPage() {
                   )}
                 </div>
 
-                <div className="h-10 rounded-ios bg-ios-fill border border-transparent px-2.5 flex items-center gap-1.5 overflow-hidden">
+                <div className="h-10 rounded-ios bg-ios-fill border border-transparent px-2.5 flex items-center gap-2">
                   <span className="text-footnote shrink-0">🎨</span>
-                  <div className="flex items-center justify-center gap-1.5 min-w-0 flex-1 flex-nowrap overflow-hidden">
+                  <div className="flex items-center justify-center gap-2 min-w-0 flex-1 flex-nowrap">
                     {NOTE_COLORS.map(color => (
                       <button
                         key={color}
                         type="button"
                         onClick={() => setForm(prev => ({ ...prev, color }))}
-                        className={`w-[18px] h-[18px] rounded-full shrink-0 transition-all ${form.color === color ? 'ring-2 ring-white shadow-ios-sm scale-110' : 'hover:scale-105'}`}
+                        className={`w-7 h-7 rounded-full shrink-0 border-2 transition-all ${form.color === color ? 'border-white shadow-ios-sm ring-2 ring-ios-blue/20' : 'border-transparent hover:scale-105'}`}
                         style={{ background: color }}
                         aria-label={`Pick color ${color}`}
                       />

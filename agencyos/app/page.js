@@ -7,7 +7,7 @@ export default function Home() {
   const router = useRouter();
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
-      router.push(session ? '/dashboard' : '/login');
+      router.push(session ? '/dashboard' : '/lp.html');
     });
   }, []);
   return (
