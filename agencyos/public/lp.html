@@ -19,7 +19,7 @@ body{background:var(--bg);color:var(--white);font-family:Montserrat,sans-serif;o
 #stars{position:fixed;inset:0;pointer-events:none;z-index:0}
 .star{position:absolute;background:#fff;border-radius:50%;animation:tw var(--d,3s) ease-in-out infinite var(--dl,0s)}
 @keyframes tw{0%,100%{opacity:.05}50%{opacity:var(--op,.5)}}
-canvas#rc{position:fixed;top:0;left:0;pointer-events:none;z-index:500;width:100vw;height:100vh}
+canvas#rc{position:fixed;top:0;left:0;pointer-events:none;z-index:500;width:100vw;height:100vh;image-rendering:-webkit-optimize-contrast;image-rendering:crisp-edges}
 
 /* i18n handled by JS */
 
@@ -280,9 +280,10 @@ footer{border-top:1px solid var(--border);padding:2rem 5%;display:flex;align-ite
 .reveal.v{opacity:1;transform:translateY(0)}
 
 /* RESPONSIVE */
+@media(max-width:768px){canvas#rc{display:none !important}}
 @media(max-width:900px){
   .nav-links{display:none}
-  .pgrid,.fin-in,.pain-box,.pgrid2,.wgrid,.contact-in,.counters-grid,.testi-grid{grid-template-columns:1fr}
+  .pgrid,.fin-in,.pain-box,.pgrid2,.wgrid,.contact-in,.counters-grid,.testi-grid,.proj-status-grid{grid-template-columns:1fr}
   h1{font-size:2.4rem}
   .counters-grid{grid-template-columns:repeat(2,1fr)}
   .testi-grid{grid-template-columns:1fr}
@@ -298,6 +299,16 @@ footer{border-top:1px solid var(--border);padding:2rem 5%;display:flex;align-ite
 /* hero spacer */
 .hero-spacer{height:180px;display:flex;align-items:flex-end;justify-content:center;padding-bottom:1.5rem}
 </style>
+<script>
+// Auto-redirect logged-in users to dashboard
+try {
+  const key = Object.keys(localStorage).find(k => k.startsWith("sb-") </head></head> k.endsWith("-auth-token"));
+  if (key) {
+    const s = JSON.parse(localStorage.getItem(key));
+    if (s </head></head> s.access_token) window.location.replace("/dashboard");
+  }
+} catch(e) {}
+</script>
 </head>
 <body>
 <div id="stars"></div>
@@ -1013,8 +1024,15 @@ document.querySelectorAll('.reveal').forEach(el=>revObs.observe(el));
    ROCKET ENGINE — STABLE & CLAMPED
    ══════════════════════════════════════ */
 const canvas=document.getElementById('rc');
-const ctx=canvas.getContext('2d');
-function resize(){canvas.width=window.innerWidth;canvas.height=window.innerHeight}
+const ctx=canvas.getContext('2d');ctx.imageSmoothingEnabled=true;ctx.imageSmoothingQuality='high';
+function resize(){
+  const dpr=window.devicePixelRatio||1;
+  canvas.width=window.innerWidth*dpr;
+  canvas.height=window.innerHeight*dpr;
+  canvas.style.width=window.innerWidth+'px';
+  canvas.style.height=window.innerHeight+'px';
+  ctx.scale(dpr,dpr);
+}
 resize();window.addEventListener('resize',resize);
 
 const rImg=new Image();
