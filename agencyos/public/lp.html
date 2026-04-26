@@ -2,6 +2,11 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+<script>(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':
+new Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s)[0],
+j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
+'https://www.googletagmanager.com/gtm.js?id='+i+dl;f.parentNode.insertBefore(j,f);
+})(window,document,'script','dataLayer','GTM-T9XM93W3');</script>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Sky Metrics — Track Everything. Scale Anything.</title>
 <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
@@ -311,6 +316,7 @@ try {
 </script>
 </head>
 <body>
+<noscript><iframe src="https://www.googletagmanager.com/ns.html?id=GTM-T9XM93W3" height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
 <div id="stars"></div>
 <canvas id="rc"></canvas>
 
@@ -663,8 +669,8 @@ try {
       <div class="check-list">
         <div class="check-item" data-t="check1">Full access to all features</div>
         <div class="check-item" data-t="check2">Account setup within 24 hours</div>
-        <div class="check-item" data-t="check3">No credit card required</div>
-        <div class="check-item" data-t="check4">Cancel anytime</div>
+        
+        
       </div>
     </div>
     <div class="reveal" style="transition-delay:.1s">
@@ -685,7 +691,7 @@ try {
         </div>
         <div class="fg"><label data-t="f-company-lbl">Company Name</label><input type="text" id="fCompany" placeholder="Acme Agency"/></div>
         <button class="fsub" onclick="submitForm()" data-t="f-submit">Send Request →</button>
-        <div class="fnote" data-t="f-note">We reply within 24h · No credit card required</div>
+        <div class="fnote" data-t="f-note">We reply within 24h</div>
       </div>
       <div class="fsuccess" id="formSuccess">
         <div style="font-size:3rem;margin-bottom:1rem">🚀</div>
@@ -878,14 +884,14 @@ const T={
   'contact-sub':[`Tell us about your needs and we'll set up your account within 24 hours.`,'Spune-ne despre nevoile tale și îți configurăm contul în 24 de ore.'],
   'check1':['Full access to all features','Acces complet la toate funcțiile'],
   'check2':['Account setup within 24 hours','Configurare cont în 24 de ore'],
-  'check3':['No credit card required','Fără card de credit'],
-  'check4':['Cancel anytime','Anulezi oricând'],
+  'check3':['',''],
+  'check4':['',''],
   'f-name-lbl':['Full Name','Nume Complet'],
   'f-type-lbl':['Account Type','Tip Cont'],
   'f-seats-lbl':['Number of Seats (min. 2)','Număr Locuri (min. 2)'],
   'f-company-lbl':['Company Name','Nume Companie'],
   'f-submit':['Send Request →','Trimite Cererea →'],
-  'f-note':['We reply within 24h · No credit card required','Răspundem în 24h · Fără card de credit'],
+  'f-note':['We reply within 24h','Răspundem în 24h · Fără card de credit'],
   'f-ok':['Request received!','Cerere primită!'],
   'f-ok-p':[`We'll reach out within 24 hours.`,'Te contactăm în 24 de ore.'],
   'who-tag':['For Who','Pentru Cine'],
@@ -911,7 +917,7 @@ const T={
   'rm5-p':['Romanian + English + more on request.','Română + Engleză + mai multe la cerere.'],
   'cta-h2':['Ready for <span class="gt">liftoff?</span>','Pregătit de <span class="gt">lansare?</span>'],
   'cta-p':['Join agencies and freelancers who know exactly where their time and money goes.','Alătură-te agențiilor și freelancerilor care știu exact unde se duc timpul și banii lor.'],
-  'cta-note':['No credit card required · Cancel anytime','Fără card de credit · Anulezi oricând'],
+  'cta-note':['',''],
   'login-btn':['Login','Autentificare'],
   'get-access-nav':['Get Access →','Obține Acces →'],
   'foot-copy':['© 2026 ToTheSky · Built for agencies. Powered by ambition.','© 2026 ToTheSky · Construit pentru agenții. Alimentat de ambiție.'],
@@ -947,7 +953,7 @@ function submitForm(){
   if(!n||!e||!t){alert(currentLang?'Completează toate câmpurile obligatorii.':'Please fill in all required fields.');return;}
   const seats=document.getElementById('fSeats')?.value||'1';
   const co=document.getElementById('fCompany').value.trim();
-  window.location.href=`mailto:contact@tothesky.online?subject=${encodeURIComponent('Sky Metrics Access — '+t+' — '+co)}&body=Name: ${n}%0AEmail: ${e}%0AType: ${t}%0ASeats: ${seats}%0ACompany: ${co}`;
+  /* form submitted - no mailto */
   document.getElementById('contactForm').style.display='none';
   document.getElementById('formSuccess').style.display='block';
 }
