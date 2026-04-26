@@ -1,3 +1,16 @@
+export const metadata = {
+  title: 'Terms & Conditions',
+  description: 'Read the Terms & Conditions for using Sky Metrics — the project management and time tracking platform for agencies.',
+  alternates: {
+    canonical: 'https://www.sky-metrics.online/terms',
+  },
+  openGraph: {
+    title: 'Terms & Conditions | Sky Metrics',
+    description: 'Read the Terms & Conditions for using Sky Metrics.',
+    url: 'https://www.sky-metrics.online/terms',
+  },
+};
+
 export default function TermsPage() {
   return (
     <div style={{background:'#05080f',color:'#F0F4FF',fontFamily:'Montserrat,sans-serif',minHeight:'100vh',padding:'0'}}>

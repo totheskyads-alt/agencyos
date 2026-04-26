@@ -273,12 +273,12 @@ export default function BugsPage() {
           <div className="space-y-3">
             <p className="text-headline font-semibold">{openIdeas.length} ideas</p>
             {openIdeas.length === 0 && <div className="card p-10 text-center"><Lightbulb className="w-8 h-8 text-ios-label4 mx-auto mb-2"/><p className="text-subhead text-ios-secondary">No ideas yet</p></div>}
-            {openIdeas.map((idea, idx) => (
+            {openIdeas.map((idea) => (
               <div key={idea.id} className="card p-4">
                 <div className="flex items-start justify-between gap-2">
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-1">
-                      <span className="text-caption2 font-bold text-ios-tertiary bg-ios-fill px-1.5 py-0.5 rounded">#{idx+1}</span>
+                      <span className="text-caption2 font-bold text-ios-tertiary bg-ios-fill px-1.5 py-0.5 rounded">#{ideas.length - ideas.findIndex(i => i.id === idea.id)}</span>
                       <span className={`text-caption2 font-semibold capitalize ${priorityColor[idea.priority]}`}>{idea.priority}</span>
                     </div>
                     <p className="text-subhead font-semibold">{idea.title}</p>
@@ -296,10 +296,10 @@ export default function BugsPage() {
               <details className="mt-2">
                 <summary className="text-caption1 text-ios-tertiary cursor-pointer px-1 py-2 font-semibold uppercase tracking-wide">{doneIdeas.length} done</summary>
                 <div className="space-y-2 mt-2">
-                  {doneIdeas.map((idea, idx) => (
+                  {doneIdeas.map((idea) => (
                     <div key={idea.id} className="card p-3 opacity-50 flex items-center justify-between">
                       <div className="flex items-center gap-2">
-                        <span className="text-caption2 font-bold text-ios-tertiary bg-ios-fill px-1.5 py-0.5 rounded">#{idx+1}</span>
+                        <span className="text-caption2 font-bold text-ios-tertiary bg-ios-fill px-1.5 py-0.5 rounded">#{ideas.length - ideas.findIndex(i => i.id === idea.id)}</span>
                         <p className="text-footnote line-through text-ios-secondary">{idea.title}</p>
                       </div>
                       <button onClick={() => deleteIdea(idea.id)} className="p-1 rounded hover:bg-red-50 text-ios-tertiary hover:text-ios-red shrink-0"><Trash2 className="w-3 h-3"/></button>

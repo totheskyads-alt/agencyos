@@ -1,3 +1,16 @@
+export const metadata = {
+  title: 'Privacy Policy',
+  description: 'Learn how Sky Metrics collects, uses, and protects your personal data. We are committed to your privacy.',
+  alternates: {
+    canonical: 'https://www.sky-metrics.online/privacy',
+  },
+  openGraph: {
+    title: 'Privacy Policy | Sky Metrics',
+    description: 'Learn how Sky Metrics collects, uses, and protects your personal data.',
+    url: 'https://www.sky-metrics.online/privacy',
+  },
+};
+
 export default function PrivacyPage() {
   return (
     <div style={{background:'#05080f',color:'#F0F4FF',fontFamily:'Montserrat,sans-serif',minHeight:'100vh',padding:'0'}}>

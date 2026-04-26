@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { useSearchParams, useRouter } from 'next/navigation';
 import Modal from '@/components/Modal';
 import { supabase } from '@/lib/supabase';
 import { getProjectAccess } from '@/lib/projectAccess';
@@ -49,6 +49,19 @@ function toDateTimeLocalValue(value) {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
+function fmtCreatedAt(value) {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  return date.toLocaleString('en-GB', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
 function fmtReminder(value) {
   if (!value) return '';
   const date = new Date(value);
@@ -90,7 +103,9 @@ function NoteTagPill({ tag, onRemove, color = '#007AFF' }) {
 
 export default function NotesPage() {
   const params = useSearchParams();
+  const router = useRouter();
   const { isAdmin } = useRole();
+  const newNoteProcessedRef = useRef(false);
   const editorRef = useRef(null);
   const [notes, setNotes] = useState([]);
   const [projects, setProjects] = useState([]);
@@ -189,8 +204,10 @@ export default function NotesPage() {
     if (noteId && noteData?.length) {
       const match = noteData.find(note => note.id === noteId);
       if (match) openEdit(match);
-    } else if (shouldOpen) {
+    } else if (shouldOpen && !newNoteProcessedRef.current) {
+      newNoteProcessedRef.current = true;
       openAdd(params.get('project') || '', params.get('task') || '');
+      router.replace('/dashboard/notes');
     }
   }
 
@@ -447,6 +464,7 @@ export default function NotesPage() {
                 {note.projects?.name && <span className="badge badge-blue">{note.projects.name}</span>}
                 {note.projects?.clients?.name && <span className="badge badge-gray">{note.projects.clients.name}</span>}
                 {note.tasks?.title && <span className="badge badge-orange">{note.tasks.title}</span>}
+                {note.created_at && <span className="text-caption1 text-ios-tertiary">{fmtCreatedAt(note.created_at)}</span>}
                 {note.reminder_at && <span className="badge badge-red">Reminder {fmtReminder(note.reminder_at)}</span>}
                 {tagArray(note.tags).slice(0, 3).map(tag => <NoteTagPill key={tag} tag={tag} color={note.color || '#007AFF'} />)}
               </div>
@@ -563,7 +581,15 @@ export default function NotesPage() {
               </div>
               {form.task_id && (
                 <div className="pt-6">
-                  <span className="badge badge-orange">Linked to task</span>
+                  <a
+                    href={`/dashboard/tasks?task=${form.task_id}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="badge badge-orange cursor-pointer hover:opacity-80 transition-opacity"
+                    title="Open linked task"
+                  >
+                    🔗 {selected?.tasks?.title ? `Task: ${selected.tasks.title}` : 'Linked to task'}
+                  </a>
                 </div>
               )}
             </div>

@@ -557,16 +557,18 @@ function TaskDetail({ task, members, boardColumns, projects, labels: allLabels, 
               </div>
               {showProjDrop && (
                 <div className="absolute top-full left-0 right-0 mt-1 bg-white rounded-ios-lg shadow-ios-modal border border-ios-separator/30 z-50 max-h-60 overflow-y-auto">
-                  <div className="p-2 border-b border-ios-separator/30 space-y-1">
-                    <button onClick={async () => {
-                        setShowNewProj(true); setShowProjDrop(false);
-                        const { data: cl } = await supabase.from('clients').select('id,name').order('name');
-                        setProjClients(cl || []);
-                      }}
-                      className="flex items-center gap-2 w-full px-2 py-1.5 text-footnote text-ios-blue hover:bg-blue-50 rounded-ios font-semibold">
-                      <Plus className="w-3.5 h-3.5" /> New Project
-                    </button>
-                  </div>
+                  {actorProfile?.role !== 'operator' && (
+                    <div className="p-2 border-b border-ios-separator/30 space-y-1">
+                      <button onClick={async () => {
+                          setShowNewProj(true); setShowProjDrop(false);
+                          const { data: cl } = await supabase.from('clients').select('id,name').order('name');
+                          setProjClients(cl || []);
+                        }}
+                        className="flex items-center gap-2 w-full px-2 py-1.5 text-footnote text-ios-blue hover:bg-blue-50 rounded-ios font-semibold">
+                        <Plus className="w-3.5 h-3.5" /> New Project
+                      </button>
+                    </div>
+                  )}
                   {filteredProjects.map(p => (
                     <button key={p.id} onClick={() => { setForm(prev => ({ ...prev, project_id: p.id })); setShowProjDrop(false); setProjSearch(p.name); }}
                       className={`w-full flex items-center gap-2 px-3 py-2.5 hover:bg-ios-fill text-left ${form.project_id === p.id ? 'bg-blue-50' : ''}`}>

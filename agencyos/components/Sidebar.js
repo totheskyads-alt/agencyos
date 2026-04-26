@@ -33,10 +33,10 @@ export default function Sidebar({ user, profile, open = false, setOpen = () => {
     <>
       {open && <div className="lg:hidden fixed inset-0 bg-black/30 z-30 backdrop-blur-sm" onClick={() => setOpen(false)} />}
 
-      <aside className={`fixed left-0 top-0 h-full w-60 bg-white/95 backdrop-blur-ios border-r border-ios-separator/30 z-40 transition-transform duration-300 lg:translate-x-0 ${open ? 'translate-x-0' : '-translate-x-full'}`}>
+      <aside className={`fixed left-0 top-12 lg:top-0 h-[calc(100vh-3rem)] lg:h-full w-60 bg-white/95 backdrop-blur-ios border-r border-ios-separator/30 z-40 transition-transform duration-300 lg:translate-x-0 ${open ? 'translate-x-0' : '-translate-x-full'}`}>
         <div className="flex flex-col h-full">
-          {/* Logo */}
-          <div className="px-5 py-5 border-b border-ios-separator/30">
+          {/* Logo — visible only on desktop; on mobile the header already shows it */}
+          <div className="hidden lg:block px-5 py-5 border-b border-ios-separator/30">
             <Link href="/dashboard" onClick={() => setOpen(false)} className="flex items-center gap-3 rounded-ios hover:opacity-90 transition-opacity">
               <img src="/logo.jpg" alt="Sky Metrics" className="w-10 h-10 rounded-full object-cover shadow-ios-sm ring-2 ring-ios-blue/20" />
               <div>
