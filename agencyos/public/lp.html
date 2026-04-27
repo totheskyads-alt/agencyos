@@ -771,6 +771,10 @@ try {
     </div>
     <div class="reveal" style="transition-delay:.1s">
       <div class="cform" id="contactForm">
+        <!-- honeypot — hidden from humans, bots fill it -->
+        <div style="position:absolute;left:-9999px;top:-9999px;height:0;overflow:hidden" aria-hidden="true">
+          <input type="text" id="fHoneypot" tabindex="-1" autocomplete="off" />
+        </div>
         <div class="fg"><label data-t="f-name-lbl">Full Name</label><input type="text" id="fName" placeholder="John Doe"/></div>
         <div class="fg"><label>Email</label><input type="email" id="fEmail" placeholder="john@agency.com"/></div>
         <div class="fg">
@@ -1041,8 +1045,14 @@ function setLang(l){
 
 
 /* FORM */
+const _formLoadTime = Date.now();
 function handleType(){document.getElementById('seatsRow').classList.toggle('show',document.getElementById('fType').value==='agency')}
 async function submitForm(){
+  // Anti-spam: honeypot check
+  if(document.getElementById('fHoneypot').value){return;}
+  // Anti-spam: timing check (too fast = bot)
+  if(Date.now()-_formLoadTime < 3000){return;}
+
   const n=document.getElementById('fName').value.trim();
   const e=document.getElementById('fEmail').value.trim();
   const t=document.getElementById('fType').value;

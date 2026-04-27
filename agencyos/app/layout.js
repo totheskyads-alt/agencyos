@@ -68,6 +68,19 @@ export default function RootLayout({ children }) {
       <head>
         <link rel="icon" type="image/png" href="/icon-192.png" />
         <link rel="apple-touch-icon" href="/apple-icon.png" />
+        {/* GTM Consent Mode v2 — must run BEFORE GTM loads */}
+        <script dangerouslySetInnerHTML={{ __html: `
+          window.dataLayer=window.dataLayer||[];
+          function gtag(){dataLayer.push(arguments);}
+          gtag('consent','default',{
+            analytics_storage:'denied',
+            ad_storage:'denied',
+            ad_user_data:'denied',
+            ad_personalization:'denied',
+            wait_for_update:500
+          });
+          (function(){try{var c=localStorage.getItem('sm_cookie_consent');if(c==='all'){gtag('consent','update',{analytics_storage:'granted',ad_storage:'granted',ad_user_data:'granted',ad_personalization:'granted'});}}catch(e){}})();
+        `}} />
         {/* Google Tag Manager */}
         <Script id="gtm-head" strategy="afterInteractive">{`
           (function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':
