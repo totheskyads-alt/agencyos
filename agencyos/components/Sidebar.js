@@ -3,12 +3,13 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { useRole } from '@/lib/useRole';
-import { LayoutDashboard, Timer, Users, FolderOpen, CheckSquare, BarChart3, UsersRound, LogOut, Receipt, Bug, NotebookText } from 'lucide-react';
+import { LayoutDashboard, Timer, Users, FolderOpen, CheckSquare, BarChart3, UsersRound, LogOut, Receipt, Bug, NotebookText, TrendingUp } from 'lucide-react';
 
 const ALL_NAV = [
   { href: '/dashboard',          icon: LayoutDashboard, label: 'Dashboard',    permission: null },
   { href: '/dashboard/timer',    icon: Timer,           label: 'Timer',        permission: null },
   { href: '/dashboard/clients',  icon: Users,           label: 'Clients',      permission: 'canViewClients' },
+  { href: '/dashboard/crm',      icon: TrendingUp,      label: 'Pipeline CRM', permission: 'canViewClients' },
   { href: '/dashboard/projects', icon: FolderOpen,      label: 'Projects',     permission: 'canViewProjects' },
   { href: '/dashboard/tasks',    icon: CheckSquare,     label: 'Tasks',        permission: null },
   { href: '/dashboard/notes',    icon: NotebookText,    label: 'Notes',        permission: null },
