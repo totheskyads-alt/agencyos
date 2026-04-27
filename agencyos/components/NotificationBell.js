@@ -127,28 +127,28 @@ function playNotificationSound(volume = 70) {
 
   const context = new AudioContext();
   const master = context.createGain();
-  const gainMultiplier = 0.45 + (normalizedVolume / 100) * 0.9;
+  const gainMultiplier = 0.6 + (normalizedVolume / 100) * 1.4;
   master.gain.setValueAtTime(0.0001, context.currentTime);
-  master.gain.exponentialRampToValueAtTime(0.13 * gainMultiplier, context.currentTime + 0.02);
-  master.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + 0.72);
+  master.gain.exponentialRampToValueAtTime(0.45 * gainMultiplier, context.currentTime + 0.02);
+  master.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + 0.85);
   master.connect(context.destination);
 
-  [660, 880].forEach((frequency, index) => {
-    const start = context.currentTime + index * 0.13;
+  [660, 880, 1100].forEach((frequency, index) => {
+    const start = context.currentTime + index * 0.14;
     const osc = context.createOscillator();
     const gain = context.createGain();
     osc.type = 'sine';
     osc.frequency.setValueAtTime(frequency, start);
     gain.gain.setValueAtTime(0.0001, start);
-    gain.gain.exponentialRampToValueAtTime(0.8, start + 0.03);
-    gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.34);
+    gain.gain.exponentialRampToValueAtTime(1.0, start + 0.03);
+    gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.38);
     osc.connect(gain);
     gain.connect(master);
     osc.start(start);
-    osc.stop(start + 0.36);
+    osc.stop(start + 0.40);
   });
 
-  setTimeout(() => context.close().catch(() => {}), 900);
+  setTimeout(() => context.close().catch(() => {}), 1100);
 }
 
 export default function NotificationBell() {

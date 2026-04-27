@@ -102,6 +102,9 @@ export default function GlobalTimer() {
   async function handleStart() {
     if (!selProject || loading) return;
     setLoading(true);
+    // Reset saved position so active timer starts at its default CSS position (not off-screen)
+    setFloatingPosition(null);
+    try { localStorage.removeItem(TIMER_POSITION_KEY); } catch {}
     await startTimer({ projectId: selProject, description: description || null });
     setShowStart(false); setSelProject(''); setDescription('');
     setLoading(false);
@@ -248,7 +251,7 @@ export default function GlobalTimer() {
   // ── Start popup ───────────────────────────────────────────────────────────
   if (showStart) {
     return (
-      <div className="fixed inset-0 z-50 flex items-end justify-center pb-6 px-4 bg-black/20 backdrop-blur-sm"
+      <div className="fixed inset-0 z-50 flex items-center justify-center px-4 bg-black/20 backdrop-blur-sm"
         onClick={e => { if (e.target === e.currentTarget) setShowStart(false); }}>
         <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl border border-ios-separator/20 overflow-hidden">
           <div className="px-5 pt-4 pb-2 flex items-center justify-between border-b border-ios-separator/30">

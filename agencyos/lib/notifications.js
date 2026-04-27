@@ -234,7 +234,7 @@ export async function ensureTaskReminderNotifications(userId) {
   const { data: tasks, error } = await supabase
     .from('tasks')
     .select('id,title,project_id,reminder_at')
-    .eq('assigned_to', userId)
+    .or(`assigned_to.eq.${userId},created_by.eq.${userId}`)
     .not('reminder_at', 'is', null)
     .lte('reminder_at', nowIso)
     .or('is_archived.eq.false,is_archived.is.null')

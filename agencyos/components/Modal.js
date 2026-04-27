@@ -16,13 +16,10 @@ export default function Modal({ title, onClose, children, size = 'md' }) {
   const sizes = { sm: 'max-w-sm', md: 'max-w-lg', lg: 'max-w-2xl', xl: 'max-w-4xl' };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
-      <div className={`relative bg-white w-full ${sizes[size]} rounded-t-ios-xl sm:rounded-ios-xl shadow-ios-modal max-h-[90vh] overflow-hidden flex flex-col`}>
-        {/* Handle (mobile) */}
-        <div className="sm:hidden flex justify-center pt-2.5 pb-1 shrink-0">
-          <div className="w-9 h-1 bg-ios-separator rounded-full" />
-        </div>
+      <div className={`relative bg-white w-full ${sizes[size]} rounded-ios-xl shadow-ios-modal max-h-[90vh] overflow-hidden flex flex-col`}>
+        <div className="hidden" />
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-ios-separator/50 shrink-0">
           <h3 className="text-headline font-semibold text-ios-primary">{title}</h3>

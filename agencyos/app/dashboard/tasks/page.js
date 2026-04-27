@@ -10,7 +10,7 @@ import { getProjectAccess, grantProjectAccess } from '@/lib/projectAccess';
 import { createTaskAssignedByUserNotification, createCommentMentionNotification, findMentionedUsers } from '@/lib/notifications';
 import { emitMomentProgress } from '@/lib/teamMoments';
 import { createNextRecurringTask, getOrdinalWeekOfMonth, getWeekdayOnlyValues, normalizeWeekdays, RECURRENCE_END_TYPES, RECURRENCE_MONTH_WEEKS, RECURRENCE_TYPES, RECURRENCE_WEEKDAYS } from '@/lib/taskRecurrence';
-import { useSearchParams } from 'next/navigation';
+import { useSearchParams, useRouter } from 'next/navigation';
 import {
   Bell, Plus, Search, ChevronDown, ArrowLeft, MessageSquare,
   Paperclip, Trash2, Send, Archive, Kanban, MoreHorizontal,
@@ -1171,11 +1171,13 @@ function TaskRow({ task, members, boardColumns, taskLabels, activeTimer, elapsed
 // ─── MAIN PAGE ────────────────────────────────────────────────────────────────
 export default function TasksPage() {
   const searchParams = useSearchParams();
+  const router = useRouter();
   const urlClientId = searchParams.get('client') || '';
   const urlProjectId = searchParams.get('project') || '';
   const urlMode = searchParams.get('mode') || '';
   const urlTaskId = searchParams.get('task') || '';
   const urlTab = searchParams.get('tab') || '';
+  const taskOpenProcessedRef = useRef(false);
   // Persist view in localStorage
   const [mode, setMode] = useState(() => {
     try { return localStorage.getItem(VIEW_KEY) || 'list'; } catch { return 'list'; }
@@ -1301,13 +1303,16 @@ export default function TasksPage() {
 
   useEffect(() => {
     if (!tasksLoaded || !urlTaskId) return;
+    if (taskOpenProcessedRef.current) return;
     const target = [...tasks, ...archivedTasks].find(t => t.id === urlTaskId);
     if (!target) return;
-    if (taskModal?.id !== target.id) setTaskModal(target);
+    taskOpenProcessedRef.current = true;
+    setTaskModal(target);
     if (target.project_id) setFilterProject(target.project_id);
     if (target.is_archived) updateMode('archive');
     else if (urlMode === 'board') updateMode('board');
     else updateMode('list');
+    router.replace('/dashboard/tasks');
   }, [tasksLoaded, urlTaskId, urlMode, tasks, archivedTasks]);
 
   async function loadAll(targetUserId) {

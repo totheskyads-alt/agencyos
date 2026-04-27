@@ -125,6 +125,9 @@ export default function NotesPage() {
   const [fontSize, setFontSize] = useState('3');
   const [showLabelDrop, setShowLabelDrop] = useState(false);
   const [labelSearch, setLabelSearch] = useState('');
+  const [boldActive, setBoldActive] = useState(false);
+  const [italicActive, setItalicActive] = useState(false);
+  const [clientFilter, setClientFilter] = useState('');
   const labelRef = useRef(null);
 
   useEffect(() => {
@@ -152,6 +155,18 @@ export default function NotesPage() {
   }, [modalOpen, selected?.id]);
 
   useEffect(() => {
+    if (!modalOpen) return;
+    function onSelectionChange() {
+      try {
+        setBoldActive(document.queryCommandState('bold'));
+        setItalicActive(document.queryCommandState('italic'));
+      } catch {}
+    }
+    document.addEventListener('selectionchange', onSelectionChange);
+    return () => document.removeEventListener('selectionchange', onSelectionChange);
+  }, [modalOpen]);
+
+  useEffect(() => {
     function handleClickOutside(e) {
       if (labelRef.current && !labelRef.current.contains(e.target)) {
         setShowLabelDrop(false);
@@ -174,7 +189,7 @@ export default function NotesPage() {
 
     let noteQuery = supabase
       .from('notes')
-      .select('*, projects(id,name,color,clients(name)), tasks(id,title)')
+      .select('*, projects(id,name,color,client_id,clients(id,name)), tasks(id,title)')
       .eq('created_by', user.id)
       .order('updated_at', { ascending: false });
 
@@ -368,14 +383,23 @@ export default function NotesPage() {
     load();
   }
 
+  const uniqueClients = useMemo(() => {
+    const map = new Map();
+    projects.forEach(p => {
+      if (p.client_id && p.clients?.name) map.set(p.client_id, p.clients.name);
+    });
+    return [...map.entries()].sort((a, b) => a[1].localeCompare(b[1]));
+  }, [projects]);
+
   const filteredNotes = useMemo(() => notes.filter(note => {
+    if (clientFilter && note.projects?.client_id !== clientFilter) return false;
     if (projectFilter && note.project_id !== projectFilter) return false;
     if (taskFilter && note.task_id !== taskFilter) return false;
     if (statusFilter !== 'all' && note.status !== statusFilter) return false;
     const haystack = `${note.title || ''} ${stripHtml(note.body || '')} ${(note.projects?.name || '')} ${(note.tasks?.title || '')} ${(note.tags || []).join(' ')}`.toLowerCase();
     if (search && !haystack.includes(search.toLowerCase())) return false;
     return true;
-  }), [notes, projectFilter, taskFilter, statusFilter, search]);
+  }), [notes, clientFilter, projectFilter, taskFilter, statusFilter, search]);
 
   const selectedFormProject = projects.find(project => project.id === form.project_id);
   const filteredProjectChoices = useMemo(() => {
@@ -439,6 +463,41 @@ export default function NotesPage() {
               {option.label}
             </button>
           ))}
+          {uniqueClients.length > 0 && (
+            <select
+              value={clientFilter}
+              onChange={e => { setClientFilter(e.target.value); setProjectFilter(''); }}
+              className="h-8 px-3 rounded-ios bg-ios-fill text-footnote text-ios-primary focus:outline-none border border-ios-separator/30 cursor-pointer"
+            >
+              <option value="">All clients</option>
+              {uniqueClients.map(([id, name]) => (
+                <option key={id} value={id}>{name}</option>
+              ))}
+            </select>
+          )}
+          {projects.length > 0 && (
+            <select
+              value={projectFilter}
+              onChange={e => { setProjectFilter(e.target.value); setClientFilter(''); }}
+              className="h-8 px-3 rounded-ios bg-ios-fill text-footnote text-ios-primary focus:outline-none border border-ios-separator/30 cursor-pointer"
+            >
+              <option value="">All projects</option>
+              {(clientFilter
+                ? projects.filter(p => p.client_id === clientFilter)
+                : projects
+              ).map(p => (
+                <option key={p.id} value={p.id}>{p.clients?.name ? `${p.clients.name} — ` : ''}{p.name}</option>
+              ))}
+            </select>
+          )}
+          {(clientFilter || projectFilter) && (
+            <button
+              onClick={() => { setClientFilter(''); setProjectFilter(''); }}
+              className="px-2.5 py-1.5 rounded-ios text-footnote font-semibold bg-red-50 text-ios-red border border-red-100"
+            >
+              Clear filter ×
+            </button>
+          )}
         </div>
       </div>
 
@@ -596,12 +655,12 @@ export default function NotesPage() {
 
             <div>
               <label className="input-label">Notes</label>
-              <div className="rounded-ios border border-ios-separator/40 bg-white overflow-hidden">
+              <div className="rounded-ios border border-ios-separator/40 bg-white">
                 <div className="flex flex-wrap items-center gap-1.5 px-3 py-2 border-b border-ios-separator/30 bg-ios-fill/50">
-                  <button type="button" onMouseDown={e => { e.preventDefault(); runEditorCommand('bold'); }} className="p-1.5 rounded-ios hover:bg-white text-ios-secondary hover:text-ios-primary">
+                  <button type="button" onMouseDown={e => { e.preventDefault(); runEditorCommand('bold'); }} className={`p-1.5 rounded-ios transition-all ${boldActive ? 'bg-ios-blue text-white shadow-ios-sm' : 'hover:bg-white text-ios-secondary hover:text-ios-primary'}`}>
                     <Bold className="w-4 h-4" />
                   </button>
-                  <button type="button" onMouseDown={e => { e.preventDefault(); runEditorCommand('italic'); }} className="p-1.5 rounded-ios hover:bg-white text-ios-secondary hover:text-ios-primary">
+                  <button type="button" onMouseDown={e => { e.preventDefault(); runEditorCommand('italic'); }} className={`p-1.5 rounded-ios transition-all ${italicActive ? 'bg-ios-blue text-white shadow-ios-sm' : 'hover:bg-white text-ios-secondary hover:text-ios-primary'}`}>
                     <Italic className="w-4 h-4" />
                   </button>
                   <button type="button" onMouseDown={e => { e.preventDefault(); runEditorCommand('insertUnorderedList'); }} className="p-1.5 rounded-ios hover:bg-white text-ios-secondary hover:text-ios-primary">
@@ -627,14 +686,17 @@ export default function NotesPage() {
                     </select>
                   </div>
                 </div>
-                <div
-                  ref={editorRef}
-                  contentEditable
-                  suppressContentEditableWarning
-                  onBlur={syncEditorBody}
-                  className="min-h-[120px] px-4 py-3 text-body text-ios-primary bg-ios-fill outline-none [&_ul]:list-disc [&_ul]:pl-5 [&_ul]:my-2 [&_ol]:list-decimal [&_ol]:pl-5 [&_ol]:my-2 [&_li]:my-1"
-                  data-placeholder="Write notes, links, action points, mini checklists..."
-                />
+                <div style={{ resize: 'vertical', overflow: 'auto', minHeight: '180px' }}>
+                  <div
+                    ref={editorRef}
+                    contentEditable
+                    suppressContentEditableWarning
+                    onBlur={syncEditorBody}
+                    className="h-full px-4 py-3 text-body text-ios-primary bg-ios-fill outline-none [&_ul]:list-disc [&_ul]:pl-5 [&_ul]:my-2 [&_ol]:list-decimal [&_ol]:pl-5 [&_ol]:my-2 [&_li]:my-1"
+                    style={{ minHeight: '180px' }}
+                    data-placeholder="Write notes, links, action points, mini checklists..."
+                  />
+                </div>
               </div>
             </div>
 
@@ -712,15 +774,15 @@ export default function NotesPage() {
                   )}
                 </div>
 
-                <div className="h-10 rounded-ios bg-ios-fill border border-transparent px-2.5 flex items-center gap-2">
+                <div className="h-10 rounded-ios bg-ios-fill border border-transparent px-2.5 flex items-center gap-1.5 overflow-hidden">
                   <span className="text-footnote shrink-0">🎨</span>
-                  <div className="flex items-center justify-center gap-2 min-w-0 flex-1 flex-nowrap">
+                  <div className="flex items-center gap-1 min-w-0 flex-1 flex-wrap">
                     {NOTE_COLORS.map(color => (
                       <button
                         key={color}
                         type="button"
                         onClick={() => setForm(prev => ({ ...prev, color }))}
-                        className={`w-7 h-7 rounded-full shrink-0 border-2 transition-all ${form.color === color ? 'border-white shadow-ios-sm ring-2 ring-ios-blue/20' : 'border-transparent hover:scale-105'}`}
+                        className={`w-5 h-5 rounded-full shrink-0 border-2 transition-all ${form.color === color ? 'border-white shadow-ios-sm ring-2 ring-ios-blue/20' : 'border-transparent hover:scale-110'}`}
                         style={{ background: color }}
                         aria-label={`Pick color ${color}`}
                       />
