@@ -2,6 +2,28 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+<!-- GTM Consent Mode v2 — must be before GTM loads -->
+<script>
+window.dataLayer=window.dataLayer||[];
+function gtag(){dataLayer.push(arguments);}
+gtag('consent','default',{
+  analytics_storage:'denied',
+  ad_storage:'denied',
+  ad_user_data:'denied',
+  ad_personalization:'denied',
+  wait_for_update:500
+});
+// If user already consented, grant immediately
+(function(){
+  try{
+    var c=localStorage.getItem('sm_cookie_consent');
+    if(c==='all'){
+      gtag('consent','update',{analytics_storage:'granted',ad_storage:'granted',ad_user_data:'granted',ad_personalization:'granted'});
+    }
+  }catch(e){}
+})();
+</script>
+<!-- Google Tag Manager -->
 <script>(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':
 new Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s)[0],
 j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
@@ -1020,14 +1042,32 @@ function setLang(l){
 
 /* FORM */
 function handleType(){document.getElementById('seatsRow').classList.toggle('show',document.getElementById('fType').value==='agency')}
-function submitForm(){
+async function submitForm(){
   const n=document.getElementById('fName').value.trim();
   const e=document.getElementById('fEmail').value.trim();
   const t=document.getElementById('fType').value;
   if(!n||!e||!t){alert(currentLang?'Completează toate câmpurile obligatorii.':'Please fill in all required fields.');return;}
-  const seats=document.getElementById('fSeats')?.value||'1';
+  const seats=document.getElementById('fSeats')?.value||null;
   const co=document.getElementById('fCompany').value.trim();
-  /* form submitted - no mailto */
+
+  const btn=document.querySelector('.fsub');
+  btn.disabled=true;
+  btn.textContent=currentLang?'Se trimite...':'Sending...';
+
+  try{
+    const res=await fetch('/api/contact',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({full_name:n,email:e,account_type:t,seats:seats||null,company_name:co||null})
+    });
+    if(!res.ok)throw new Error('error');
+  }catch(err){
+    btn.disabled=false;
+    btn.textContent=currentLang?'Trimite Cererea →':'Send Request →';
+    alert(currentLang?'Eroare la trimitere. Încearcă din nou.':'Error sending. Please try again.');
+    return;
+  }
+
   document.getElementById('contactForm').style.display='none';
   document.getElementById('formSuccess').style.display='block';
 }
@@ -1322,6 +1362,92 @@ function tick(){
 rImg.onload=()=>tick();
 if(rImg.complete)tick();
 
+</script>
+
+<!-- ═══════════════════════════════════════════════════════════
+     COOKIE CONSENT BANNER — GDPR EU compliant
+════════════════════════════════════════════════════════════════ -->
+<style>
+#cookie-banner{
+  position:fixed;bottom:0;left:0;right:0;z-index:9999;
+  background:rgba(5,8,15,0.97);
+  border-top:1px solid rgba(59,143,255,0.25);
+  backdrop-filter:blur(20px);
+  padding:1.25rem 5%;
+  display:flex;align-items:center;justify-content:space-between;gap:1.5rem;flex-wrap:wrap;
+  transform:translateY(100%);
+  transition:transform .4s cubic-bezier(.16,1,.3,1);
+  box-shadow:0 -8px 40px rgba(0,0,0,.5);
+}
+#cookie-banner.show{transform:translateY(0)}
+.cb-text{flex:1;min-width:220px}
+.cb-text p{font-size:.78rem;color:#6B7A9F;line-height:1.7;margin:0}
+.cb-text p strong{color:#F0F4FF;font-weight:700}
+.cb-text a{color:#3B8FFF;text-decoration:none;font-weight:600}
+.cb-text a:hover{text-decoration:underline}
+.cb-btns{display:flex;gap:.6rem;flex-shrink:0;flex-wrap:wrap}
+.cb-accept{background:#3B8FFF;color:#fff;border:none;padding:.6rem 1.3rem;border-radius:100px;font-family:Montserrat,sans-serif;font-size:.78rem;font-weight:700;cursor:pointer;transition:all .2s;box-shadow:0 4px 14px rgba(59,143,255,.3)}
+.cb-accept:hover{background:#2d7aef;transform:translateY(-1px)}
+.cb-essential{background:transparent;color:#6B7A9F;border:1px solid rgba(255,255,255,.12);padding:.6rem 1.3rem;border-radius:100px;font-family:Montserrat,sans-serif;font-size:.78rem;font-weight:600;cursor:pointer;transition:all .2s}
+.cb-essential:hover{border-color:rgba(255,255,255,.25);color:#F0F4FF}
+.cb-settings{background:transparent;color:#6B7A9F;border:none;font-family:Montserrat,sans-serif;font-size:.72rem;font-weight:600;cursor:pointer;text-decoration:underline;padding:.4rem .6rem;transition:color .2s}
+.cb-settings:hover{color:#F0F4FF}
+@media(max-width:600px){
+  #cookie-banner{flex-direction:column;align-items:flex-start;padding:1rem 1.2rem}
+  .cb-btns{width:100%}
+  .cb-accept,.cb-essential{flex:1;text-align:center}
+}
+</style>
+
+<div id="cookie-banner" role="dialog" aria-label="Cookie consent" aria-live="polite">
+  <div class="cb-text">
+    <p>
+      <strong>🍪 We use cookies.</strong>
+      Sky Metrics uses essential cookies for authentication and optional analytics cookies (Google Tag Manager) to improve the platform.
+      You can accept all cookies or choose only the essential ones.
+      <a href="/privacy" target="_blank">Privacy Policy</a>
+    </p>
+  </div>
+  <div class="cb-btns">
+    <button class="cb-essential" onclick="cookieConsent('essential')">Only Essential</button>
+    <button class="cb-accept" onclick="cookieConsent('all')">Accept All</button>
+  </div>
+</div>
+
+<script>
+(function(){
+  function setCookie(name,value,days){
+    var exp=new Date();exp.setDate(exp.getDate()+days);
+    document.cookie=name+'='+value+';expires='+exp.toUTCString()+';path=/;SameSite=Lax';
+  }
+  function getCookieConsent(){
+    try{return localStorage.getItem('sm_cookie_consent');}catch(e){return null;}
+  }
+  window.cookieConsent=function(level){
+    try{localStorage.setItem('sm_cookie_consent',level);}catch(e){}
+    setCookie('sm_cookie_consent',level,365);
+    if(level==='all'){
+      if(typeof gtag==='function'){
+        gtag('consent','update',{
+          analytics_storage:'granted',
+          ad_storage:'granted',
+          ad_user_data:'granted',
+          ad_personalization:'granted'
+        });
+      }
+    }
+    document.getElementById('cookie-banner').style.transform='translateY(100%)';
+    setTimeout(function(){document.getElementById('cookie-banner').style.display='none';},400);
+  };
+  // Show banner only if no consent stored yet
+  var consent=getCookieConsent();
+  if(!consent){
+    setTimeout(function(){
+      var b=document.getElementById('cookie-banner');
+      if(b){b.classList.add('show');}
+    },1200);
+  }
+})();
 </script>
 </body>
 </html>

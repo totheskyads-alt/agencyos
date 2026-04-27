@@ -3,7 +3,7 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { useRole } from '@/lib/useRole';
-import { LayoutDashboard, Timer, Users, FolderOpen, CheckSquare, BarChart3, UsersRound, LogOut, Receipt, Bug, NotebookText } from 'lucide-react';
+import { LayoutDashboard, Timer, Users, FolderOpen, CheckSquare, BarChart3, UsersRound, LogOut, Receipt, Bug, NotebookText, Inbox } from 'lucide-react';
 
 const ALL_NAV = [
   { href: '/dashboard',          icon: LayoutDashboard, label: 'Dashboard',    permission: null },
@@ -16,6 +16,7 @@ const ALL_NAV = [
   { href: '/dashboard/reports',  icon: BarChart3,       label: 'Reports',      permission: 'canViewReports' },
   { href: '/dashboard/team',     icon: UsersRound,      label: 'Team',         permission: 'canManageTeam' },
   { href: '/dashboard/bugs',     icon: Bug,             label: 'Bug Tracker',  permission: null },
+  { href: '/dashboard/requests', icon: Inbox,           label: 'Requests',     permission: 'canManageTeam' },
 ];
 
 export default function Sidebar({ user, profile, open = false, setOpen = () => {} }) {
