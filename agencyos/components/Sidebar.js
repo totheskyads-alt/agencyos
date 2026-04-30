@@ -3,7 +3,7 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { useRole } from '@/lib/useRole';
-import { LayoutDashboard, Timer, Users, FolderOpen, CheckSquare, BarChart3, UsersRound, LogOut, Receipt, Bug, NotebookText, TrendingUp, CalendarDays } from 'lucide-react';
+import { LayoutDashboard, Timer, Users, FolderOpen, CheckSquare, BarChart3, UsersRound, LogOut, Receipt, Bug, NotebookText, TrendingUp, CalendarDays, X } from 'lucide-react';
 
 const ALL_NAV = [
   { href: '/dashboard',          icon: LayoutDashboard, label: 'Dashboard',    permission: null },
@@ -33,22 +33,29 @@ export default function Sidebar({ user, profile, open = false, setOpen = () => {
 
   return (
     <>
-      {open && <div className="lg:hidden fixed inset-0 bg-black/30 z-30 backdrop-blur-sm" onClick={() => setOpen(false)} />}
+      {open && <div className="lg:hidden fixed inset-0 bg-black/36 z-40" onClick={() => setOpen(false)} />}
 
-      <aside className={`fixed left-0 top-12 lg:top-0 h-[calc(100vh-3rem)] lg:h-full w-60 bg-white/95 backdrop-blur-ios border-r border-ios-separator/30 z-40 transition-transform duration-300 lg:translate-x-0 ${open ? 'translate-x-0' : '-translate-x-full'}`}>
+      <aside
+        className={`fixed inset-y-0 left-0 w-64 bg-white border-r border-ios-separator/40 z-50 transition-transform duration-300 lg:bg-white/94 lg:backdrop-blur-ios lg:translate-x-0 ${open ? 'translate-x-0' : '-translate-x-full'}`}
+      >
         <div className="flex flex-col h-full">
-          {/* Logo — visible only on desktop; on mobile the header already shows it */}
-          <div className="hidden lg:block px-5 py-5 border-b border-ios-separator/30">
-            <Link href="/dashboard" onClick={() => setOpen(false)} className="flex items-center gap-3 rounded-ios hover:opacity-90 transition-opacity">
-              <img src="/logo.jpg" alt="Sky Metrics" className="w-10 h-10 rounded-full object-cover shadow-ios-sm ring-2 ring-ios-blue/20" />
-              <div>
-                <p className="text-headline font-bold text-ios-primary">Sky Metrics</p>
+          <div className="dashboard-sidebar-brand h-12 px-4 lg:px-5 border-b border-ios-separator/40 flex items-center justify-between bg-white shrink-0 lg:bg-white/92 lg:backdrop-blur-ios">
+            <Link href="/dashboard" onClick={() => setOpen(false)} className="flex items-center gap-3 min-w-0 rounded-ios hover:opacity-90 transition-opacity">
+              <img src="/logo.jpg" alt="Sky Metrics" className="w-9 h-9 rounded-full object-cover shadow-ios-sm ring-2 ring-ios-blue/15 shrink-0" />
+              <div className="min-w-0">
+                <p className="text-headline font-bold text-ios-primary truncate">Sky Metrics</p>
                 <p className="text-caption1 text-ios-secondary">v2.0</p>
               </div>
             </Link>
+            <button
+              type="button"
+              onClick={() => setOpen(false)}
+              className="lg:hidden w-9 h-9 rounded-full bg-ios-fill flex items-center justify-center text-ios-secondary hover:bg-ios-fill2 transition-colors shrink-0"
+            >
+              <X className="w-4.5 h-4.5" strokeWidth={2.5} />
+            </button>
           </div>
 
-          {/* Nav */}
           <nav className="flex-1 p-3 space-y-0.5 overflow-y-auto">
             {nav.map(({ href, icon: Icon, label }) => {
               const active = pathname === href || (href !== '/dashboard' && pathname.startsWith(href));
@@ -62,8 +69,7 @@ export default function Sidebar({ user, profile, open = false, setOpen = () => {
             })}
           </nav>
 
-          {/* User — click to go to profile */}
-          <div className="p-3 border-t border-ios-separator/30">
+          <div className="p-3 border-t border-ios-separator/40 bg-white shrink-0 lg:bg-white/86 lg:backdrop-blur-ios">
             <Link href="/dashboard/profile" onClick={() => setOpen(false)}
               className={`flex items-center gap-3 px-3 py-2.5 rounded-ios hover:bg-ios-fill transition-colors mb-1 ${pathname === '/dashboard/profile' ? 'bg-ios-fill' : ''}`}>
               {profile?.avatar_url ? (

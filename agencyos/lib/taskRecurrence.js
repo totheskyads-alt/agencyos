@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase';
+import { embedCallMetadata } from '@/lib/callMetadata';
 
 export const RECURRENCE_TYPES = [
   { value: 'none', label: 'Does not repeat' },
@@ -237,24 +238,106 @@ export async function createNextRecurringTask(task) {
   if (!task.recurrence_type || task.recurrence_type === 'none') return null;
   if (task.recurrence_generated_task_id) return null;
 
+  let existingOpenQuery = supabase
+    .from('tasks')
+    .select('id')
+    .eq('project_id', task.project_id)
+    .eq('title', task.title)
+    .eq('recurrence_type', task.recurrence_type)
+    .neq('status', 'done')
+    .or('is_archived.eq.false,is_archived.is.null')
+    .limit(1);
+
+  if (task.assigned_to) existingOpenQuery = existingOpenQuery.eq('assigned_to', task.assigned_to);
+  else existingOpenQuery = existingOpenQuery.is('assigned_to', null);
+
+  const { data: existingOpen } = await existingOpenQuery;
+  if (existingOpen?.length) return existingOpen[0];
+
   const nextPayload = buildNextRecurringPayload(task);
   if (!nextPayload) return null;
 
-  const { data: newTask, error } = await supabase
+  let insertResult = await supabase
     .from('tasks')
     .insert(nextPayload)
     .select()
     .single();
+
+  if (insertResult.error && /(starts_at|ends_at|all_day|meeting_link|call_note_template|recurrence_generated_task_id|recurrence_origin_task_id)/i.test(insertResult.error.message || '')) {
+    const {
+      starts_at,
+      ends_at,
+      all_day,
+      meeting_link,
+      call_note_template,
+      recurrence_generated_task_id,
+      recurrence_origin_task_id,
+      ...fallbackPayload
+    } = nextPayload;
+
+    fallbackPayload.description = nextPayload.task_type === 'call'
+      ? embedCallMetadata(nextPayload.description || '', { starts_at, ends_at, meeting_link, call_note_template })
+      : (nextPayload.description || '');
+
+    insertResult = await supabase
+      .from('tasks')
+      .insert(fallbackPayload)
+      .select()
+      .single();
+  }
+
+  if (insertResult.error) {
+    const minimalPayload = {
+      title: nextPayload.title,
+      description: nextPayload.task_type === 'call'
+        ? embedCallMetadata(nextPayload.description || '', {
+            starts_at: nextPayload.starts_at,
+            ends_at: nextPayload.ends_at,
+            meeting_link: nextPayload.meeting_link,
+            call_note_template: nextPayload.call_note_template,
+          })
+        : (nextPayload.description || ''),
+      assigned_to: nextPayload.assigned_to || null,
+      priority: nextPayload.priority || 'medium',
+      due_date: nextPayload.due_date || null,
+      reminder_at: nextPayload.reminder_at || null,
+      column_id: nextPayload.column_id || null,
+      project_id: nextPayload.project_id,
+      task_type: nextPayload.task_type || 'general',
+      status: 'todo',
+      position: nextPayload.position ?? 9999,
+      is_archived: false,
+      archived_at: null,
+      recurrence_type: nextPayload.recurrence_type || 'none',
+      recurrence_interval: Math.max(1, Number(nextPayload.recurrence_interval) || 1),
+      recurrence_weekdays: nextPayload.recurrence_weekdays || null,
+      recurrence_daily_mode: nextPayload.recurrence_daily_mode || 'interval',
+      recurrence_end_type: nextPayload.recurrence_end_type || 'never',
+      recurrence_until: nextPayload.recurrence_until || null,
+    };
+
+    insertResult = await supabase
+      .from('tasks')
+      .insert(minimalPayload)
+      .select()
+      .single();
+  }
+
+  const { data: newTask, error } = insertResult;
 
   if (error || !newTask) {
     console.warn('Could not create next recurring task', error);
     return null;
   }
 
-  await supabase
+  const updateLinkResult = await supabase
     .from('tasks')
     .update({ recurrence_generated_task_id: newTask.id })
     .eq('id', task.id);
+
+  if (updateLinkResult.error && !/recurrence_generated_task_id/i.test(updateLinkResult.error.message || '')) {
+    console.warn('Could not link recurring task to source task', updateLinkResult.error);
+  }
 
   const { data: labelRows } = await supabase
     .from('task_labels')

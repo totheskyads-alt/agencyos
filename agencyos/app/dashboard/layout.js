@@ -8,7 +8,7 @@ import GlobalTimer from '@/components/GlobalTimer';
 import NotificationBell from '@/components/NotificationBell';
 import TeamMomentOverlay from '@/components/TeamMomentOverlay';
 import { TimerProvider } from '@/lib/timerContext';
-import { Clock3, LogOut, Menu, ShieldAlert, X } from 'lucide-react';
+import { Clock3, LogOut, Menu, ShieldAlert } from 'lucide-react';
 
 export default function DashboardLayout({ children }) {
   const router = useRouter();
@@ -92,14 +92,14 @@ export default function DashboardLayout({ children }) {
         <Sidebar user={user} profile={profile} open={mobileNavOpen} setOpen={setMobileNavOpen} />
         <TeamMomentOverlay userId={user?.id} />
 
-        <header className="fixed top-0 left-0 right-0 lg:left-60 z-40 h-12 bg-white/94 backdrop-blur-ios border-b border-ios-separator/40">
+        <header className="dashboard-topbar fixed top-0 left-0 right-0 lg:left-64 z-40 h-12 bg-white/92 backdrop-blur-ios border-b border-ios-separator/40">
           <div className="h-full px-3 lg:px-5 flex items-center justify-between lg:justify-end gap-3">
             <div className="flex items-center gap-3 min-w-0 lg:hidden">
               <button onClick={() => setMobileNavOpen(v => !v)} className="lg:hidden p-2 -ml-2 rounded-ios hover:bg-ios-fill transition-colors">
-                {mobileNavOpen ? <X className="w-5 h-5 text-ios-secondary" /> : <Menu className="w-5 h-5 text-ios-secondary" />}
+                <Menu className="w-5 h-5 text-ios-secondary" />
               </button>
               <Link href="/dashboard" className="flex items-center gap-2 min-w-0 rounded-ios hover:opacity-90 transition-opacity">
-                <img src="/logo.jpg" alt="Sky Metrics" className="w-8 h-8 rounded-full object-cover shadow-ios-sm" />
+                <img src="/logo.jpg" alt="Sky Metrics" className="w-8 h-8 rounded-full object-cover shadow-ios-sm ring-2 ring-ios-blue/10" />
                 <div className="min-w-0">
                   <p className="text-subhead font-bold text-ios-primary truncate">Sky Metrics</p>
                 </div>
@@ -112,12 +112,12 @@ export default function DashboardLayout({ children }) {
           </div>
         </header>
 
-        <main className="flex-1 lg:ml-60 pt-12 pb-16 min-h-screen">
+        <main className="flex-1 lg:ml-64 pt-12 pb-16 min-h-screen">
           <div className="p-3 lg:p-5">
             {children}
           </div>
         </main>
-        <GlobalTimer />
+        <GlobalTimer hidden={mobileNavOpen} />
       </div>
     </TimerProvider>
   );

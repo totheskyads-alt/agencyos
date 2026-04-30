@@ -3,6 +3,7 @@ import { useMemo, useState, useEffect, useRef } from 'react';
 import { flushSync } from 'react-dom';
 import { supabase } from '@/lib/supabase';
 import Modal from '@/components/Modal';
+import { embedCallMetadata, getCallField, stripCallMetadata } from '@/lib/callMetadata';
 import { fmtDate, fmtClock } from '@/lib/utils';
 import { useRole } from '@/lib/useRole';
 import { useTimer } from '@/lib/timerContext';
@@ -100,6 +101,54 @@ function addMinutesToLocalDateTime(localValue, minutes) {
   if (Number.isNaN(date.getTime())) return '';
   date.setMinutes(date.getMinutes() + minutes);
   return toDateTimeLocalValue(date.toISOString());
+}
+
+function minutesBetweenLocalDateTimes(startValue, endValue) {
+  if (!startValue || !endValue) return 30;
+  const start = new Date(startValue);
+  const end = new Date(endValue);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return 30;
+  return Math.max(15, Math.round((end.getTime() - start.getTime()) / 60000));
+}
+
+function buildTaskPayloadFallback(payload, form, errorMessage = '') {
+  const fallbackPayload = { ...payload };
+  const needsCallFallback = /(starts_at|ends_at|meeting_link|call_note_template|all_day)/i.test(errorMessage);
+  const needsRecurrenceFallback = /recurrence_/i.test(errorMessage);
+  const needsReminderFallback = /reminder_at/i.test(errorMessage);
+
+  if (needsCallFallback) {
+    const startsAt = fallbackPayload.starts_at;
+    const endsAt = fallbackPayload.ends_at;
+    const meetingLink = fallbackPayload.meeting_link;
+    const callNoteTemplate = fallbackPayload.call_note_template;
+    delete fallbackPayload.starts_at;
+    delete fallbackPayload.ends_at;
+    delete fallbackPayload.meeting_link;
+    delete fallbackPayload.call_note_template;
+    delete fallbackPayload.all_day;
+    fallbackPayload.description = form.task_type === 'call'
+      ? embedCallMetadata(form.description, { starts_at: startsAt, ends_at: endsAt, meeting_link: meetingLink, call_note_template: callNoteTemplate })
+      : form.description;
+  }
+
+  if (needsRecurrenceFallback) {
+    delete fallbackPayload.recurrence_type;
+    delete fallbackPayload.recurrence_interval;
+    delete fallbackPayload.recurrence_weekdays;
+    delete fallbackPayload.recurrence_daily_mode;
+    delete fallbackPayload.recurrence_end_type;
+    delete fallbackPayload.recurrence_until;
+    delete fallbackPayload.recurrence_monthly_mode;
+    delete fallbackPayload.recurrence_monthly_week;
+    delete fallbackPayload.recurrence_monthly_weekday;
+  }
+
+  if (needsReminderFallback) {
+    delete fallbackPayload.reminder_at;
+  }
+
+  return fallbackPayload;
 }
 
 function getDefaultCallWindow() {
@@ -208,19 +257,23 @@ function TaskDetail({ task, members, boardColumns, projects, labels: allLabels, 
   const isNew = !task?.id;
   const isTimerActive = activeTimer?.task_id === task?.id;
   const defaultScheduleDay = scheduleDayFromTask(task);
+  const taskCallStartsAt = getCallField(task, 'starts_at');
+  const taskCallEndsAt = getCallField(task, 'ends_at');
+  const taskMeetingLink = getCallField(task, 'meeting_link');
+  const taskCallTemplate = getCallField(task, 'call_note_template');
 
   const [form, setForm] = useState({
     task_type: task?.task_type || 'general',
     title: task?.title || '',
-    description: task?.description || '',
+    description: stripCallMetadata(task?.description || ''),
     assigned_to: task?.assigned_to || currentUser?.id || '',
     priority: task?.priority || 'medium',
     due_date: task?.due_date || '',
     reminder_at: toDateTimeLocalValue(task?.reminder_at),
-    starts_at: toDateTimeLocalValue(task?.starts_at),
-    ends_at: toDateTimeLocalValue(task?.ends_at),
-    meeting_link: task?.meeting_link || '',
-    call_note_template: task?.call_note_template || '',
+    starts_at: toDateTimeLocalValue(taskCallStartsAt),
+    ends_at: toDateTimeLocalValue(taskCallEndsAt),
+    meeting_link: taskMeetingLink || '',
+    call_note_template: taskCallTemplate || '',
     column_id: task?.column_id || boardColumns[0]?.id || '',
     project_id: task?.project_id || '',
     recurrence_type: task?.recurrence_type || 'none',
@@ -430,7 +483,7 @@ function TaskDetail({ task, members, boardColumns, projects, labels: allLabels, 
     if (task?.id) {
       let { error } = await supabase.from('tasks').update(payload).eq('id', task.id);
       if (error && /(reminder_at|recurrence_|starts_at|ends_at|meeting_link|call_note_template)/i.test(error.message || '')) {
-        const { starts_at, ends_at, meeting_link, call_note_template, recurrence_type, recurrence_interval, recurrence_weekdays, recurrence_daily_mode, recurrence_end_type, recurrence_until, recurrence_monthly_mode, recurrence_monthly_week, recurrence_monthly_weekday, ...fallbackPayload } = payload;
+        const fallbackPayload = buildTaskPayloadFallback(payload, form, error.message || '');
         ({ error } = await supabase.from('tasks').update(fallbackPayload).eq('id', task.id));
       }
       if (error) {
@@ -442,7 +495,7 @@ function TaskDetail({ task, members, boardColumns, projects, labels: allLabels, 
         .insert({ ...payload, status: 'todo', position: nextTaskPosition })
         .select().single();
       if (insertResult.error && /(reminder_at|recurrence_|starts_at|ends_at|meeting_link|call_note_template)/i.test(insertResult.error.message || '')) {
-        const { starts_at, ends_at, meeting_link, call_note_template, recurrence_type, recurrence_interval, recurrence_weekdays, recurrence_daily_mode, recurrence_end_type, recurrence_until, recurrence_monthly_mode, recurrence_monthly_week, recurrence_monthly_weekday, ...fallbackPayload } = payload;
+        const fallbackPayload = buildTaskPayloadFallback(payload, form, insertResult.error.message || '');
         insertResult = await supabase.from('tasks')
           .insert({ ...fallbackPayload, status: 'todo', position: nextTaskPosition })
           .select().single();
@@ -585,6 +638,7 @@ function TaskDetail({ task, members, boardColumns, projects, labels: allLabels, 
   const callDate = datePartFromDateTime(form.starts_at) || form.due_date || '';
   const callStartTime = timePartFromDateTime(form.starts_at);
   const callEndTime = timePartFromDateTime(form.ends_at);
+  const callDurationMinutes = minutesBetweenLocalDateTimes(form.starts_at, form.ends_at);
   const nextTaskPosition = useMemo(() => {
     const targetColumnId = form.column_id || boardColumns[0]?.id || null;
     const relevantTasks = existingTasks.filter(existingTask => (existingTask.column_id || null) === targetColumnId);
@@ -786,9 +840,37 @@ function TaskDetail({ task, members, boardColumns, projects, labels: allLabels, 
 
             {isCall && (
               <div className="rounded-ios border border-ios-separator/40 bg-ios-bg/60 p-3 space-y-2">
-                <div className="flex items-center gap-2">
-                  <Clock3 className="w-4 h-4 text-ios-blue" />
-                  <p className="text-footnote font-semibold text-ios-primary">Schedule call quickly</p>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <Clock3 className="w-4 h-4 text-ios-blue" />
+                    <p className="text-footnote font-semibold text-ios-primary">Schedule call quickly</p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    {[15, 30, 45, 60].map(minutes => {
+                      const active = callDurationMinutes === minutes;
+                      return (
+                        <button
+                          key={minutes}
+                          type="button"
+                          onClick={() => setForm(prev => {
+                            const baseStart = prev.starts_at || combineDateAndTime(callDate || prev.due_date || datePartFromDateTime(prev.ends_at) || datePartFromDateTime(getDefaultCallWindow().starts_at), callStartTime || '09:00');
+                            return {
+                              ...prev,
+                              starts_at: baseStart,
+                              ends_at: addMinutesToLocalDateTime(baseStart, minutes),
+                              due_date: datePartFromDateTime(baseStart),
+                              reminder_at: addMinutesToLocalDateTime(baseStart, -10),
+                            };
+                          })}
+                          className={`px-3 py-1.5 rounded-ios text-footnote font-semibold transition-all ${
+                            active ? 'bg-ios-blue text-white shadow-ios-sm' : 'bg-white text-ios-secondary border border-ios-separator/50 hover:border-ios-blue/40 hover:text-ios-blue'
+                          }`}
+                        >
+                          {minutes} min
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
                   <div>
@@ -823,11 +905,13 @@ function TaskDetail({ task, members, boardColumns, projects, labels: allLabels, 
                         const nextTime = e.target.value;
                         setForm(prev => {
                           const nextStartsAt = combineDateAndTime(callDate || prev.due_date || datePartFromDateTime(prev.starts_at), nextTime);
+                          const duration = minutesBetweenLocalDateTimes(prev.starts_at, prev.ends_at);
                           return {
                             ...prev,
                             due_date: datePartFromDateTime(nextStartsAt),
                             starts_at: nextStartsAt,
-                            reminder_at: prev.reminder_at ? addMinutesToLocalDateTime(nextStartsAt, -10) : addMinutesToLocalDateTime(nextStartsAt, -10),
+                            ends_at: addMinutesToLocalDateTime(nextStartsAt, duration),
+                            reminder_at: addMinutesToLocalDateTime(nextStartsAt, -10),
                           };
                         });
                       }}
@@ -1397,10 +1481,10 @@ function TaskRow({ task, members, boardColumns, taskLabels, activeTimer, elapsed
       <div className="w-2 h-2 rounded-full shrink-0" style={{ background: pri?.dot || '#AEAEB2' }} />
       <div className="flex-1 min-w-0">
         <p className={`text-subhead ${done ? 'line-through text-ios-tertiary' : 'text-ios-primary'} truncate`}>{task.title}</p>
-        {task.description && (
+        {stripCallMetadata(task.description) && (
           <p className="mt-0.5 text-caption1 text-ios-secondary overflow-hidden"
             style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>
-            {task.description}
+            {stripCallMetadata(task.description)}
           </p>
         )}
         {labels.length > 0 && (
@@ -1415,8 +1499,8 @@ function TaskRow({ task, members, boardColumns, taskLabels, activeTimer, elapsed
         {task.comment_count > 0 && <div className="flex items-center gap-0.5 text-ios-tertiary"><MessageSquare className="w-3 h-3" /><span className="text-caption2">{task.comment_count}</span></div>}
         {task.reminder_at && !done && <div className="flex items-center gap-0.5 text-ios-orange"><Bell className="w-3 h-3" /><span className="text-caption2">Reminder</span></div>}
         {task.recurrence_type && task.recurrence_type !== 'none' && <div className="flex items-center gap-0.5 text-ios-blue"><Repeat2 className="w-3 h-3" /><span className="text-caption2">Repeat</span></div>}
-        {isCall && task.starts_at
-          ? <span className="text-caption1 font-medium text-ios-secondary">{new Date(task.starts_at).toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'})}</span>
+        {isCall && getCallField(task, 'starts_at')
+          ? <span className="text-caption1 font-medium text-ios-secondary">{new Date(getCallField(task, 'starts_at')).toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'})}</span>
           : task.due_date && <span className={`text-caption1 font-medium ${isOverdue ? 'text-ios-red' : 'text-ios-tertiary'}`}>{new Date(task.due_date).toLocaleDateString('en-US',{day:'numeric',month:'short'})}</span>}
         <QuickTimer task={task} activeTimer={activeTimer} elapsed={elapsed} isPaused={isPaused} onStart={onStartTimer} onStop={onStopTimer} onPause={onPauseTimer} />
         {/* Quick archive button */}
@@ -2044,7 +2128,7 @@ export default function TasksPage() {
             const isCollapsed = collapsed[pid];
             return (
               <div key={pid}>
-                <div className="flex items-center justify-between px-4 py-2.5 bg-ios-bg border-b border-ios-separator/30 sticky top-0 z-10">
+                <div className="task-project-sticky flex items-center justify-between px-4 py-2.5 bg-ios-bg border-b border-ios-separator/30 sticky top-0 z-10">
                   <div className="flex items-center gap-2">
                     <button onClick={() => setCollapsed(p => ({ ...p, [pid]: !isCollapsed }))} className="text-ios-tertiary hover:text-ios-primary">
                       <ChevronDown className={`w-4 h-4 transition-transform ${isCollapsed ? '-rotate-90' : ''}`}/>
@@ -2244,10 +2328,10 @@ export default function TasksPage() {
                           </button>
                         </div>
 
-                        {task.description && (
+                        {stripCallMetadata(task.description) && (
                           <p className="mt-1.5 text-[11px] leading-snug text-ios-secondary overflow-hidden"
                             style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>
-                            {task.description}
+                            {stripCallMetadata(task.description)}
                           </p>
                         )}
 
@@ -2285,8 +2369,8 @@ export default function TasksPage() {
                             )}
                           </div>
                           <div className="flex items-center gap-1 shrink-0">
-                            {isCall && task.starts_at
-                              ? <span className="text-[10px] text-ios-tertiary">{new Date(task.starts_at).toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'})}</span>
+                            {isCall && getCallField(task, 'starts_at')
+                              ? <span className="text-[10px] text-ios-tertiary">{new Date(getCallField(task, 'starts_at')).toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'})}</span>
                               : task.due_date && <span className="text-[10px] text-ios-tertiary">{new Date(task.due_date).toLocaleDateString('en-US',{day:'numeric',month:'short'})}</span>}
                             {assignee && (assignee.avatar_url ? (
                               <img src={assignee.avatar_url} alt="avatar" className="w-5 h-5 rounded-full object-cover shrink-0" />

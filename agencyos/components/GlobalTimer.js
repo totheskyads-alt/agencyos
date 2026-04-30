@@ -11,14 +11,15 @@ const TIMER_POSITION_KEY = 'sm_timer_position_v1';
 function clampPosition(position, element) {
   if (!position || !element || typeof window === 'undefined') return position;
   const margin = 16;
+  const leftInset = window.innerWidth >= 1024 ? 256 + margin : margin;
   const rect = element.getBoundingClientRect();
   return {
-    x: Math.min(Math.max(position.x, margin), Math.max(margin, window.innerWidth - rect.width - margin)),
+    x: Math.min(Math.max(position.x, leftInset), Math.max(leftInset, window.innerWidth - rect.width - margin)),
     y: Math.min(Math.max(position.y, margin), Math.max(margin, window.innerHeight - rect.height - margin)),
   };
 }
 
-export default function GlobalTimer() {
+export default function GlobalTimer({ hidden = false }) {
   const { activeTimer, elapsed, stoppedEntry, isPaused, startTimer, stopTimer, pauseTimer, dismissOverview } = useTimer();
   const [projects, setProjects] = useState([]);
   const [showStart, setShowStart] = useState(false);
@@ -45,6 +46,19 @@ export default function GlobalTimer() {
     if (!floatingPosition || typeof window === 'undefined') return;
     try { localStorage.setItem(TIMER_POSITION_KEY, JSON.stringify(floatingPosition)); } catch {}
   }, [floatingPosition]);
+
+  useEffect(() => {
+    if (!floatingPosition || !floatingRef.current) return;
+    const frame = window.requestAnimationFrame(() => {
+      setFloatingPosition(prev => {
+        if (!prev || !floatingRef.current) return prev;
+        const next = clampPosition(prev, floatingRef.current);
+        if (next.x === prev.x && next.y === prev.y) return prev;
+        return next;
+      });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [floatingPosition, activeTimer, showStart]);
 
   useEffect(() => {
     function handlePointerMove(event) {
@@ -163,6 +177,10 @@ export default function GlobalTimer() {
   const floatingStyle = floatingPosition
     ? { left: `${floatingPosition.x}px`, top: `${floatingPosition.y}px`, right: 'auto', bottom: 'auto', transform: 'none' }
     : undefined;
+
+  if (hidden && !showStart && !stoppedEntry) {
+    return null;
+  }
 
   // ── Stop overview — centered modal ────────────────────────────────────────
   if (stoppedEntry) {

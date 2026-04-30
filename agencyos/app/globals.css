@@ -4,12 +4,22 @@
 
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 
+html {
+  scrollbar-gutter: stable;
+}
+
 body {
   font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Inter', sans-serif;
   background-color: #F2F2F7;
   color: #000000;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+html.modal-scroll-lock,
+body.modal-scroll-lock {
+  overflow: hidden;
+  overscroll-behavior: none;
 }
 
 @layer components {
@@ -440,6 +450,20 @@ body {
 
 .team-moment-style-focus .team-moment-burst {
   opacity: 0.2;
+}
+
+body.modal-scroll-lock .dashboard-topbar,
+html.modal-scroll-lock .dashboard-topbar {
+  opacity: 0;
+  pointer-events: none;
+}
+
+body.modal-scroll-lock .dashboard-sidebar-brand,
+html.modal-scroll-lock .dashboard-sidebar-brand,
+body.modal-scroll-lock .task-project-sticky,
+html.modal-scroll-lock .task-project-sticky {
+  opacity: 0;
+  pointer-events: none;
 }
 
 @media (max-width: 860px) {

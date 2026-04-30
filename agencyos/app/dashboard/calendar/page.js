@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import Modal from '@/components/Modal';
 import { supabase } from '@/lib/supabase';
 import { getProjectAccess } from '@/lib/projectAccess';
+import { embedCallMetadata, getCallField } from '@/lib/callMetadata';
 import { useRole } from '@/lib/useRole';
 import {
   CalendarDays,
@@ -98,8 +99,9 @@ function getNextRoundedSlot() {
 }
 
 function getEffectiveStart(task) {
-  if (task?.starts_at) {
-    const date = new Date(task.starts_at);
+  const startsAt = getCallField(task, 'starts_at');
+  if (startsAt) {
+    const date = new Date(startsAt);
     if (!Number.isNaN(date.getTime())) return date;
   }
   if (task?.task_type === 'call' && task?.reminder_at) {
@@ -114,8 +116,9 @@ function getEffectiveStart(task) {
 }
 
 function getEffectiveEnd(task) {
-  if (task?.ends_at) {
-    const date = new Date(task.ends_at);
+  const endsAt = getCallField(task, 'ends_at');
+  if (endsAt) {
+    const date = new Date(endsAt);
     if (!Number.isNaN(date.getTime())) return date;
   }
   const start = getEffectiveStart(task);
@@ -140,7 +143,7 @@ function eventStyle(task) {
   const endMinutes = clamp((end.getHours() - DAY_START_HOUR) * 60 + end.getMinutes(), startMinutes + 30, (DAY_END_HOUR - DAY_START_HOUR) * 60);
   return {
     top: `${(startMinutes / 60) * HOUR_HEIGHT}px`,
-    height: `${Math.max(((endMinutes - startMinutes) / 60) * HOUR_HEIGHT, 36)}px`,
+    height: `${Math.max(((endMinutes - startMinutes) / 60) * HOUR_HEIGHT, 18)}px`,
   };
 }
 
@@ -364,6 +367,11 @@ async function loadScheduledTasks() {
     let result = await supabase.from('tasks').insert(payload).select().single();
     if (result.error && /(starts_at|ends_at|meeting_link)/i.test(result.error.message || '')) {
       const { starts_at, ends_at, meeting_link, ...fallbackPayload } = payload;
+      fallbackPayload.description = embedCallMetadata('', {
+        starts_at,
+        ends_at,
+        meeting_link,
+      });
       result = await supabase.from('tasks').insert(fallbackPayload).select().single();
     }
 
