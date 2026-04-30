@@ -121,6 +121,11 @@ ALTER TABLE projects
 ALTER TABLE tasks
   ADD COLUMN IF NOT EXISTS task_type TEXT DEFAULT 'general',
   ADD COLUMN IF NOT EXISTS reminder_at TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS starts_at TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS ends_at TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS all_day BOOLEAN DEFAULT FALSE,
+  ADD COLUMN IF NOT EXISTS meeting_link TEXT,
+  ADD COLUMN IF NOT EXISTS call_note_template TEXT,
   ADD COLUMN IF NOT EXISTS recurrence_type TEXT DEFAULT 'none',
   ADD COLUMN IF NOT EXISTS recurrence_interval INTEGER DEFAULT 1,
   ADD COLUMN IF NOT EXISTS recurrence_weekdays SMALLINT[],
@@ -134,6 +139,9 @@ ALTER TABLE tasks
   ADD COLUMN IF NOT EXISTS recurrence_origin_task_id UUID REFERENCES tasks(id) ON DELETE SET NULL;
 
 CREATE INDEX IF NOT EXISTS idx_tasks_reminder_at ON tasks(reminder_at);
+CREATE INDEX IF NOT EXISTS idx_tasks_starts_at ON tasks(starts_at);
+CREATE INDEX IF NOT EXISTS idx_tasks_assigned_starts_at ON tasks(assigned_to, starts_at);
+CREATE INDEX IF NOT EXISTS idx_tasks_project_starts_at ON tasks(project_id, starts_at);
 CREATE INDEX IF NOT EXISTS idx_tasks_recurrence_origin_task_id ON tasks(recurrence_origin_task_id);
 
 ALTER TABLE profiles
@@ -371,6 +379,10 @@ CREATE TABLE IF NOT EXISTS notes (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+ALTER TABLE IF EXISTS notes
+  ALTER COLUMN project_id DROP NOT NULL,
+  ALTER COLUMN title DROP NOT NULL;
+
 CREATE INDEX IF NOT EXISTS idx_notes_project_status ON notes(project_id, status, updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_notes_creator_reminder ON notes(created_by, reminder_at);
 CREATE INDEX IF NOT EXISTS idx_notes_task ON notes(task_id);
@@ -394,6 +406,8 @@ CREATE POLICY "notes_insert_own_only" ON notes
   WITH CHECK (
     created_by = auth.uid()
     AND (
+      notes.project_id IS NULL
+      OR
       EXISTS (
         SELECT 1 FROM profiles
         WHERE profiles.id = auth.uid()
@@ -426,6 +440,14 @@ CREATE POLICY "notes_delete_own_only" ON notes
   USING (
     created_by = auth.uid()
   );
+
+ALTER TABLE IF EXISTS leads
+  ADD COLUMN IF NOT EXISTS reminder_at TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS reminder_note TEXT,
+  ADD COLUMN IF NOT EXISTS position INTEGER DEFAULT 9999;
+
+CREATE INDEX IF NOT EXISTS idx_leads_reminder_at ON leads(reminder_at);
+CREATE INDEX IF NOT EXISTS idx_leads_stage_position ON leads(stage, position);
 
 -- Set the first user as admin (optional)
 -- UPDATE profiles SET role = 'admin' WHERE email = 'your-email@gmail.com';

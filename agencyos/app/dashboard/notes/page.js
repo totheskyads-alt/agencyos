@@ -83,6 +83,13 @@ function stripHtml(value) {
   return (value || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
+function getNoteTitle(note) {
+  const explicitTitle = (note?.title || '').trim();
+  if (explicitTitle) return explicitTitle;
+  const bodyPreview = stripHtml(note?.body || '');
+  return bodyPreview ? bodyPreview.slice(0, 72) : 'Quick note';
+}
+
 function NoteTagPill({ tag, onRemove, color = '#007AFF' }) {
   return (
     <span className="inline-flex items-center gap-1.5 rounded-full bg-white text-ios-secondary border border-ios-separator/40 px-2 py-0.5 text-[10px] font-semibold shrink-0">
@@ -127,7 +134,7 @@ export default function NotesPage() {
   const [labelSearch, setLabelSearch] = useState('');
   const [boldActive, setBoldActive] = useState(false);
   const [italicActive, setItalicActive] = useState(false);
-  const [clientFilter, setClientFilter] = useState('');
+  const sourceParam = params.get('source') || 'text';
   const labelRef = useRef(null);
 
   useEffect(() => {
@@ -232,6 +239,7 @@ export default function NotesPage() {
       ...emptyForm,
       project_id: prefillProject || '',
       task_id: prefillTask || '',
+      source: sourceParam === 'call' ? 'call' : 'text',
     });
     setTagInput('');
     setProjectSearch('');
@@ -250,7 +258,7 @@ export default function NotesPage() {
       color: note.color || '#007AFF',
       tags: tagArray(note.tags),
       reminder_at: toDateTimeLocalValue(note.reminder_at),
-      source: 'text',
+      source: note.source || 'text',
     });
     setTagInput('');
     setProjectSearch('');
@@ -316,22 +324,28 @@ export default function NotesPage() {
   }
 
   async function saveNote() {
-    if (!form.project_id || !form.title.trim() || !profileId) return;
+    if (!profileId) return;
     setLoading(true);
 
     const noteHtml = editorRef.current ? editorRef.current.innerHTML : form.body;
     const cleanBody = stripHtml(noteHtml);
+    if (!cleanBody) {
+      setLoading(false);
+      alert('Please add the note text first.');
+      return;
+    }
+    const title = form.title.trim() || cleanBody.slice(0, 72) || 'Quick note';
 
     const payload = {
-      project_id: form.project_id,
+      project_id: form.project_id || null,
       task_id: form.task_id || null,
-      title: form.title.trim(),
+      title,
       body: cleanBody ? noteHtml : null,
       status: form.status,
       color: form.color,
       tags: form.tags,
       reminder_at: form.reminder_at ? new Date(form.reminder_at).toISOString() : null,
-      source: 'text',
+      source: form.source || 'text',
       updated_at: new Date().toISOString(),
     };
 
@@ -383,23 +397,14 @@ export default function NotesPage() {
     load();
   }
 
-  const uniqueClients = useMemo(() => {
-    const map = new Map();
-    projects.forEach(p => {
-      if (p.client_id && p.clients?.name) map.set(p.client_id, p.clients.name);
-    });
-    return [...map.entries()].sort((a, b) => a[1].localeCompare(b[1]));
-  }, [projects]);
-
   const filteredNotes = useMemo(() => notes.filter(note => {
-    if (clientFilter && note.projects?.client_id !== clientFilter) return false;
     if (projectFilter && note.project_id !== projectFilter) return false;
     if (taskFilter && note.task_id !== taskFilter) return false;
     if (statusFilter !== 'all' && note.status !== statusFilter) return false;
     const haystack = `${note.title || ''} ${stripHtml(note.body || '')} ${(note.projects?.name || '')} ${(note.tasks?.title || '')} ${(note.tags || []).join(' ')}`.toLowerCase();
     if (search && !haystack.includes(search.toLowerCase())) return false;
     return true;
-  }), [notes, clientFilter, projectFilter, taskFilter, statusFilter, search]);
+  }), [notes, projectFilter, taskFilter, statusFilter, search]);
 
   const selectedFormProject = projects.find(project => project.id === form.project_id);
   const filteredProjectChoices = useMemo(() => {
@@ -463,39 +468,12 @@ export default function NotesPage() {
               {option.label}
             </button>
           ))}
-          {uniqueClients.length > 0 && (
-            <select
-              value={clientFilter}
-              onChange={e => { setClientFilter(e.target.value); setProjectFilter(''); }}
-              className="h-8 px-3 rounded-ios bg-ios-fill text-footnote text-ios-primary focus:outline-none border border-ios-separator/30 cursor-pointer"
-            >
-              <option value="">All clients</option>
-              {uniqueClients.map(([id, name]) => (
-                <option key={id} value={id}>{name}</option>
-              ))}
-            </select>
-          )}
-          {projects.length > 0 && (
-            <select
-              value={projectFilter}
-              onChange={e => { setProjectFilter(e.target.value); setClientFilter(''); }}
-              className="h-8 px-3 rounded-ios bg-ios-fill text-footnote text-ios-primary focus:outline-none border border-ios-separator/30 cursor-pointer"
-            >
-              <option value="">All projects</option>
-              {(clientFilter
-                ? projects.filter(p => p.client_id === clientFilter)
-                : projects
-              ).map(p => (
-                <option key={p.id} value={p.id}>{p.clients?.name ? `${p.clients.name} — ` : ''}{p.name}</option>
-              ))}
-            </select>
-          )}
-          {(clientFilter || projectFilter) && (
+          {projectFilter && (
             <button
-              onClick={() => { setClientFilter(''); setProjectFilter(''); }}
+              onClick={() => setProjectFilter('')}
               className="px-2.5 py-1.5 rounded-ios text-footnote font-semibold bg-red-50 text-ios-red border border-red-100"
             >
-              Clear filter ×
+              Clear project context ×
             </button>
           )}
         </div>
@@ -513,7 +491,7 @@ export default function NotesPage() {
             <div className="w-1.5 self-stretch rounded-full shrink-0" style={{ background: note.color || '#007AFF' }} />
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2 flex-wrap">
-                <p className={`text-subhead font-semibold ${note.status === 'resolved' ? 'line-through text-ios-tertiary' : 'text-ios-primary'}`}>{note.title}</p>
+                <p className={`text-subhead font-semibold ${note.status === 'resolved' ? 'line-through text-ios-tertiary' : 'text-ios-primary'}`}>{getNoteTitle(note)}</p>
                 <span className={`badge ${note.status === 'resolved' ? 'badge-green' : 'badge-gray'}`}>
                   {note.status === 'resolved' ? 'Resolved' : 'Open'}
                 </span>
@@ -549,7 +527,7 @@ export default function NotesPage() {
         <Modal key={selected?.id || 'new-note'} title={selected ? 'Edit Note' : 'New Note'} onClose={() => setModalOpen(false)} size="xl">
           <div className="space-y-3">
             <div>
-              <label className="input-label">Project *</label>
+              <label className="input-label">Project</label>
               {!projectPickerOpen && form.project_id ? (
                 <div className="rounded-ios bg-ios-fill px-3.5 py-3">
                   <div className="flex items-center justify-between gap-3">
@@ -630,12 +608,12 @@ export default function NotesPage() {
 
             <div className="grid grid-cols-1 lg:grid-cols-[1fr_auto] gap-3 items-start">
               <div>
-                <label className="input-label">Title *</label>
+                <label className="input-label">Title</label>
                 <input
                   className="input"
                   value={form.title}
                   onChange={e => setForm(prev => ({ ...prev, title: e.target.value }))}
-                  placeholder="What should we remember here?"
+                  placeholder="Optional headline"
                 />
               </div>
               {form.task_id && (
@@ -835,7 +813,7 @@ export default function NotesPage() {
                 </button>
               )}
               <button className="btn-secondary flex-1" onClick={() => setModalOpen(false)}>Cancel</button>
-              <button className="btn-primary flex-1" onClick={saveNote} disabled={loading || !form.project_id || !form.title.trim()}>
+              <button className="btn-primary flex-1" onClick={saveNote} disabled={loading}>
                 {loading ? 'Saving...' : 'Save Note'}
               </button>
             </div>

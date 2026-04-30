@@ -117,6 +117,26 @@ function getReminderOffset(task, baseDate) {
   return reminderDate.getTime() - baseDate.getTime();
 }
 
+function parseDateTime(value) {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return date;
+}
+
+function shiftDateTimeKeepingClock(original, fromBaseDate, toBaseDate) {
+  const source = parseDateTime(original);
+  if (!source || !fromBaseDate || !toBaseDate) return null;
+  const shifted = new Date(toBaseDate);
+  shifted.setHours(
+    source.getHours(),
+    source.getMinutes(),
+    source.getSeconds(),
+    source.getMilliseconds()
+  );
+  return shifted.toISOString();
+}
+
 export function getNextOccurrenceBaseDate(task) {
   const type = task?.recurrence_type || 'none';
   if (type === 'none') return null;
@@ -175,6 +195,8 @@ export function buildNextRecurringPayload(task) {
 
   const reminderOffset = getReminderOffset(task, baseDate);
   const nextReminderAt = reminderOffset == null ? null : new Date(nextBaseDate.getTime() + reminderOffset).toISOString();
+  const nextStartsAt = shiftDateTimeKeepingClock(task?.starts_at, baseDate, nextBaseDate);
+  const nextEndsAt = shiftDateTimeKeepingClock(task?.ends_at, baseDate, nextBaseDate);
   const rootId = task?.recurrence_origin_task_id || task?.id || null;
 
   return {
@@ -184,6 +206,11 @@ export function buildNextRecurringPayload(task) {
     priority: task.priority || 'medium',
     due_date: task.due_date ? toDateOnly(nextBaseDate) : null,
     reminder_at: nextReminderAt,
+    starts_at: nextStartsAt,
+    ends_at: nextEndsAt,
+    all_day: Boolean(task.all_day),
+    meeting_link: task.meeting_link || null,
+    call_note_template: task.call_note_template || null,
     column_id: task.column_id || null,
     project_id: task.project_id,
     task_type: task.task_type || 'general',

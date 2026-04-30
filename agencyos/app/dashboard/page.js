@@ -3,7 +3,7 @@ import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { fmtDuration, parseUTC } from '@/lib/utils';
 import { getProjectAccess, visibleClientIdsFromProjects } from '@/lib/projectAccess';
-import { ensureBillingReminderNotifications } from '@/lib/notifications';
+import { ensureBillingReminderNotifications, ensureLeadReminderNotifications } from '@/lib/notifications';
 import Modal from '@/components/Modal';
 import { MOMENT_STYLES } from '@/components/TeamMomentOverlay';
 import Link from 'next/link';
@@ -90,6 +90,9 @@ export default function DashboardPage() {
     if (accessInfo.role === 'admin') {
       ensureBillingReminderNotifications(user.id).catch((error) => {
         console.warn('Billing reminder notifications could not be refreshed', error);
+      });
+      ensureLeadReminderNotifications(user.id).catch((error) => {
+        console.warn('Lead reminder notifications could not be refreshed', error);
       });
     }
 

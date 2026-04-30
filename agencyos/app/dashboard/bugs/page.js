@@ -136,7 +136,7 @@ export default function BugsPage() {
   return (
     <div className="space-y-5">
       {/* Tab switcher */}
-      <div className="flex items-center justify-between">
+      <div className="card-section p-3 flex items-center justify-between gap-3 flex-wrap">
         <div className="flex gap-0.5 bg-ios-fill p-1 rounded-ios">
           <button onClick={() => setTab('bugs')}
             className={`flex items-center gap-2 px-4 py-2 rounded-ios-sm text-footnote font-semibold transition-all ${tab==='bugs' ? 'bg-white shadow-ios-sm text-ios-primary' : 'text-ios-secondary'}`}>
@@ -161,7 +161,7 @@ export default function BugsPage() {
 
       {/* BUGS TAB */}
       {tab === 'bugs' && (
-        <div className="grid lg:grid-cols-2 gap-6">
+        <div className="grid lg:grid-cols-[minmax(0,420px)_minmax(0,1fr)] items-start gap-6">
           {/* Form */}
           <div className="space-y-4">
             <div className="card p-5 space-y-4">
@@ -246,7 +246,7 @@ export default function BugsPage() {
 
       {/* IDEAS TAB */}
       {tab === 'ideas' && (
-        <div className="grid lg:grid-cols-2 gap-6">
+        <div className="grid lg:grid-cols-[minmax(0,420px)_minmax(0,1fr)] items-start gap-6">
           {/* Form */}
           <div className="card p-5 space-y-4">
             <p className="text-headline font-semibold">{editingIdeaId ? 'Edit Idea' : '💡 New Idea'}</p>

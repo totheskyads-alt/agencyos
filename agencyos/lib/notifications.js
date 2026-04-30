@@ -12,6 +12,9 @@ export async function createNotification({
 }) {
   if (!userId || !type || !title) return { error: null };
 
+  const isLocalDev = typeof window !== 'undefined'
+    && ['localhost', '127.0.0.1'].includes(window.location.hostname);
+
   const payload = {
     userId,
     type,
@@ -23,24 +26,26 @@ export async function createNotification({
     eventKey,
   };
 
-  try {
-    const { data: { session } } = await supabase.auth.getSession();
-    const token = session?.access_token;
-    if (token) {
-      const response = await fetch('/api/notifications/create', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify(payload),
-      });
-      if (response.ok) return { error: null };
-      const serverResult = await response.json().catch(() => ({}));
-      console.warn('Notification API could not save notification', serverResult?.error || response.statusText);
+  if (!isLocalDev) {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      if (token) {
+        const response = await fetch('/api/notifications/create', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify(payload),
+        });
+        if (response.ok) return { error: null };
+        const serverResult = await response.json().catch(() => ({}));
+        console.warn('Notification API could not save notification', serverResult?.error || response.statusText);
+      }
+    } catch (error) {
+      console.warn('Notification API fallback triggered', error);
     }
-  } catch (error) {
-    console.warn('Notification API fallback triggered', error);
   }
 
   const dbPayload = {
@@ -233,7 +238,7 @@ export async function ensureTaskReminderNotifications(userId) {
   const nowIso = new Date().toISOString();
   const { data: tasks, error } = await supabase
     .from('tasks')
-    .select('id,title,project_id,reminder_at')
+    .select('id,title,project_id,reminder_at,task_type,starts_at')
     .or(`assigned_to.eq.${userId},created_by.eq.${userId}`)
     .not('reminder_at', 'is', null)
     .lte('reminder_at', nowIso)
@@ -248,12 +253,43 @@ export async function ensureTaskReminderNotifications(userId) {
   await Promise.all((tasks || []).map(task => createNotification({
     userId,
     type: 'task_reminder',
-    title: 'Task reminder',
-    body: task.title || 'One of your tasks needs attention.',
+    title: task.task_type === 'call' ? 'Call reminder' : 'Task reminder',
+    body: task.task_type === 'call'
+      ? (task.title || 'You have a call coming up.')
+      : (task.title || 'One of your tasks needs attention.'),
     entityType: 'task',
     entityId: task.id,
     entityUrl: `/dashboard/tasks?task=${task.id}&mode=list${task.project_id ? `&project=${task.project_id}` : ''}`,
     eventKey: `task_reminder:${task.id}:${task.reminder_at}:${userId}`,
+  })));
+}
+
+export async function ensureLeadReminderNotifications(userId) {
+  if (!userId) return;
+
+  const nowIso = new Date().toISOString();
+  const { data: leads, error } = await supabase
+    .from('leads')
+    .select('id,name,stage,reminder_at,reminder_note')
+    .or(`assigned_to.eq.${userId},created_by.eq.${userId}`)
+    .not('reminder_at', 'is', null)
+    .lte('reminder_at', nowIso)
+    .not('stage', 'in', '(client,decline)');
+
+  if (error) {
+    console.warn('Lead reminders could not be loaded', error);
+    return;
+  }
+
+  await Promise.all((leads || []).map(lead => createNotification({
+    userId,
+    type: 'lead_reminder',
+    title: 'Lead reminder',
+    body: lead.reminder_note || lead.name || 'One of your leads needs attention.',
+    entityType: 'lead',
+    entityId: lead.id,
+    entityUrl: `/dashboard/crm?lead=${lead.id}`,
+    eventKey: `lead_reminder:${lead.id}:${lead.reminder_at}:${userId}`,
   })));
 }
 

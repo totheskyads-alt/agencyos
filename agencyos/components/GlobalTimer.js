@@ -62,9 +62,11 @@ export default function GlobalTimer() {
 
     window.addEventListener('pointermove', handlePointerMove);
     window.addEventListener('pointerup', handlePointerUp);
+    window.addEventListener('pointercancel', handlePointerUp);
     return () => {
       window.removeEventListener('pointermove', handlePointerMove);
       window.removeEventListener('pointerup', handlePointerUp);
+      window.removeEventListener('pointercancel', handlePointerUp);
     };
   }, []);
 
@@ -138,10 +140,14 @@ export default function GlobalTimer() {
 
   function beginDrag(event) {
     if (!floatingRef.current) return;
+    if (event.cancelable) event.preventDefault();
     const target = event.target;
     if (target instanceof HTMLElement) {
       const isHandle = target.closest('[data-timer-drag-handle="true"]');
       if (!isHandle && target.closest('button')) return;
+    }
+    if (event.currentTarget?.setPointerCapture) {
+      try { event.currentTarget.setPointerCapture(event.pointerId); } catch {}
     }
     const rect = floatingRef.current.getBoundingClientRect();
     dragRef.current = {
@@ -161,7 +167,7 @@ export default function GlobalTimer() {
   // ── Stop overview — centered modal ────────────────────────────────────────
   if (stoppedEntry) {
     return (
-      <div className="fixed inset-0 z-50 flex items-end justify-center pb-6 px-4 pointer-events-none">
+      <div className="fixed inset-0 z-[60] flex items-end justify-center pb-6 px-4 pointer-events-none">
         <div className="pointer-events-auto w-full max-w-md bg-white rounded-2xl shadow-2xl border border-ios-separator/30 overflow-hidden animate-in slide-in-from-bottom-4 duration-300">
           <div className="bg-ios-green/10 border-b border-ios-green/20 px-5 py-3 flex items-center justify-between">
             <div className="flex items-center gap-2">
@@ -216,13 +222,13 @@ export default function GlobalTimer() {
   // ── Active timer — floating pill ──────────────────────────────────────────
   if (activeTimer) {
     return (
-      <div ref={floatingRef} style={floatingStyle} className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 lg:left-auto lg:translate-x-0 lg:right-6">
+      <div ref={floatingRef} style={floatingStyle} className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 lg:left-auto lg:translate-x-0 lg:right-6">
         <div className={`flex items-center gap-3 text-white px-4 py-3 rounded-2xl shadow-2xl transition-colors ${isPaused ? 'bg-ios-orange' : 'bg-ios-blue'}`}>
           <button
             type="button"
             onPointerDown={beginDrag}
             data-timer-drag-handle="true"
-            className="shrink-0 p-1.5 rounded-xl bg-white/15 hover:bg-white/20 cursor-grab active:cursor-grabbing"
+            className="shrink-0 p-1.5 rounded-xl bg-white/15 hover:bg-white/20 cursor-grab active:cursor-grabbing touch-none select-none"
             title="Move timer"
           >
             <GripHorizontal className="w-4 h-4" />
@@ -251,7 +257,7 @@ export default function GlobalTimer() {
   // ── Start popup ───────────────────────────────────────────────────────────
   if (showStart) {
     return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center px-4 bg-black/20 backdrop-blur-sm"
+      <div className="fixed inset-0 z-[60] flex items-center justify-center px-4 bg-black/20 backdrop-blur-sm"
         onClick={e => { if (e.target === e.currentTarget) setShowStart(false); }}>
         <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl border border-ios-separator/20 overflow-hidden">
           <div className="px-5 pt-4 pb-2 flex items-center justify-between border-b border-ios-separator/30">
@@ -310,7 +316,7 @@ export default function GlobalTimer() {
 
   // ── Idle — floating button ────────────────────────────────────────────────
   return (
-    <div ref={floatingRef} style={floatingStyle} className="fixed bottom-6 right-6 z-50">
+    <div ref={floatingRef} style={floatingStyle} className="fixed bottom-6 right-6 z-40">
       <button onClick={() => { loadProjects(); setShowStart(true); }}
         className="flex items-center gap-2.5 bg-ios-blue text-white px-5 py-3 rounded-2xl shadow-2xl hover:opacity-95 active:scale-95 transition-all font-semibold text-subhead">
         <Play className="w-4 h-4" fill="white" /> Start Timer
@@ -319,7 +325,7 @@ export default function GlobalTimer() {
         type="button"
         onPointerDown={beginDrag}
         data-timer-drag-handle="true"
-        className="absolute -top-2 -left-2 w-7 h-7 rounded-full bg-white text-ios-secondary shadow-ios flex items-center justify-center cursor-grab active:cursor-grabbing"
+        className="absolute -top-2 -left-2 w-7 h-7 rounded-full bg-white text-ios-secondary shadow-ios flex items-center justify-center cursor-grab active:cursor-grabbing touch-none select-none"
         title="Move timer button"
       >
         <GripHorizontal className="w-3.5 h-3.5" />

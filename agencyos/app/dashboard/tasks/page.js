@@ -35,6 +35,10 @@ const COL_COLORS = ['#007AFF','#34C759','#FF9500','#FF3B30','#AF52DE','#32ADE6',
 const VIEW_KEY = 'agencyos_tasks_view';
 const ARCHIVED_PAGE_SIZE = 10;
 const REPEAT_INTERVALS = Array.from({ length: 12 }, (_, index) => index + 1);
+const TASK_TYPE_OPTIONS = [
+  { value: 'general', label: 'Task' },
+  { value: 'call', label: 'Call' },
+];
 
 function renderCommentText(content) {
   return content.split(/(\s+)/).map((part, i) => {
@@ -69,6 +73,51 @@ function toDateTimeLocalValue(dateStr) {
   if (Number.isNaN(date.getTime())) return '';
   const pad = value => value.toString().padStart(2, '0');
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function padDatePart(value) {
+  return String(value).padStart(2, '0');
+}
+
+function combineDateAndTime(dateValue, timeValue) {
+  if (!dateValue || !timeValue) return '';
+  return `${dateValue}T${timeValue}`;
+}
+
+function datePartFromDateTime(value) {
+  if (!value) return '';
+  return value.includes('T') ? value.split('T')[0] : '';
+}
+
+function timePartFromDateTime(value) {
+  if (!value) return '';
+  return value.includes('T') ? value.split('T')[1]?.slice(0, 5) || '' : '';
+}
+
+function addMinutesToLocalDateTime(localValue, minutes) {
+  if (!localValue) return '';
+  const date = new Date(localValue);
+  if (Number.isNaN(date.getTime())) return '';
+  date.setMinutes(date.getMinutes() + minutes);
+  return toDateTimeLocalValue(date.toISOString());
+}
+
+function getDefaultCallWindow() {
+  const now = new Date();
+  const next = new Date(now);
+  next.setSeconds(0, 0);
+  const roundedMinutes = Math.ceil(next.getMinutes() / 30) * 30;
+  if (roundedMinutes === 60) {
+    next.setHours(next.getHours() + 1, 0, 0, 0);
+  } else {
+    next.setMinutes(roundedMinutes, 0, 0);
+  }
+  const end = new Date(next);
+  end.setMinutes(end.getMinutes() + 30);
+  return {
+    starts_at: toDateTimeLocalValue(next.toISOString()),
+    ends_at: toDateTimeLocalValue(end.toISOString()),
+  };
 }
 
 function scheduleDayFromTask(task) {
@@ -155,18 +204,23 @@ function LabelPill({ label, onRemove }) {
 }
 
 // ─── Task Detail Modal ────────────────────────────────────────────────────────
-function TaskDetail({ task, members, boardColumns, projects, labels: allLabels, activeTimer, elapsed, isPaused, initialTab, onClose, onSave, onDelete, onStartTimer, onStopTimer, onPauseTimer, onProjectCreated, onLabelsChange, currentUser, actorProfile }) {
+function TaskDetail({ task, members, boardColumns, projects, labels: allLabels, existingTasks = [], activeTimer, elapsed, isPaused, initialTab, onClose, onSave, onDelete, onStartTimer, onStopTimer, onPauseTimer, onProjectCreated, onLabelsChange, currentUser, actorProfile }) {
   const isNew = !task?.id;
   const isTimerActive = activeTimer?.task_id === task?.id;
   const defaultScheduleDay = scheduleDayFromTask(task);
 
   const [form, setForm] = useState({
+    task_type: task?.task_type || 'general',
     title: task?.title || '',
     description: task?.description || '',
     assigned_to: task?.assigned_to || currentUser?.id || '',
     priority: task?.priority || 'medium',
     due_date: task?.due_date || '',
     reminder_at: toDateTimeLocalValue(task?.reminder_at),
+    starts_at: toDateTimeLocalValue(task?.starts_at),
+    ends_at: toDateTimeLocalValue(task?.ends_at),
+    meeting_link: task?.meeting_link || '',
+    call_note_template: task?.call_note_template || '',
     column_id: task?.column_id || boardColumns[0]?.id || '',
     project_id: task?.project_id || '',
     recurrence_type: task?.recurrence_type || 'none',
@@ -233,6 +287,19 @@ function TaskDetail({ task, members, boardColumns, projects, labels: allLabels, 
     if (!form.column_id && boardColumns.length > 0)
       setForm(p => ({ ...p, column_id: boardColumns[0].id }));
   }, [boardColumns]);
+
+  useEffect(() => {
+    if (form.task_type !== 'call') return;
+    if (form.starts_at && form.ends_at) return;
+    const defaults = getDefaultCallWindow();
+    setForm(prev => ({
+      ...prev,
+      starts_at: prev.starts_at || defaults.starts_at,
+      ends_at: prev.ends_at || defaults.ends_at,
+      due_date: prev.due_date || datePartFromDateTime(prev.starts_at || defaults.starts_at),
+      reminder_at: prev.reminder_at || addMinutesToLocalDateTime(prev.starts_at || defaults.starts_at, -10),
+    }));
+  }, [form.task_type, form.starts_at, form.ends_at, form.due_date, form.reminder_at]);
 
   useEffect(() => {
     const h = e => {
@@ -311,22 +378,47 @@ function TaskDetail({ task, members, boardColumns, projects, labels: allLabels, 
 
   async function save() {
     if (!form.title.trim() || !form.project_id) return;
+    if (form.task_type === 'call') {
+      if (!form.starts_at || !form.ends_at) {
+        alert('Please choose the call date and time.');
+        return;
+      }
+      const starts = new Date(form.starts_at);
+      const ends = new Date(form.ends_at);
+      if (Number.isNaN(starts.getTime()) || Number.isNaN(ends.getTime()) || ends <= starts) {
+        alert('End time needs to be after the start time.');
+        return;
+      }
+    }
     if (form.recurrence_type !== 'none' && form.recurrence_end_type === 'on_date' && !form.recurrence_until) {
       alert('Please choose an end date for this recurring task.');
       return;
     }
     setLoading(true);
     const previousAssignee = task?.id ? task.assigned_to : null;
+    const normalizedDueDate = form.task_type === 'call'
+      ? datePartFromDateTime(form.starts_at)
+      : (form.due_date || null);
+    const normalizedReminder = form.task_type === 'call'
+      ? (form.reminder_at || addMinutesToLocalDateTime(form.starts_at, -10))
+      : form.reminder_at;
+    const normalizedAssignee = form.task_type === 'call'
+      ? (form.assigned_to || currentUser?.id || null)
+      : (form.assigned_to || null);
     const payload = {
       ...form,
-      assigned_to: form.assigned_to || null,
-      due_date: form.due_date || null,
-      reminder_at: form.reminder_at ? new Date(form.reminder_at).toISOString() : null,
+      assigned_to: normalizedAssignee,
+      due_date: normalizedDueDate,
+      reminder_at: normalizedReminder ? new Date(normalizedReminder).toISOString() : null,
+      starts_at: form.task_type === 'call' && form.starts_at ? new Date(form.starts_at).toISOString() : null,
+      ends_at: form.task_type === 'call' && form.ends_at ? new Date(form.ends_at).toISOString() : null,
+      meeting_link: form.task_type === 'call' ? (form.meeting_link.trim() || null) : null,
+      call_note_template: form.task_type === 'call' ? (form.call_note_template.trim() || null) : null,
       column_id: form.column_id || boardColumns[0]?.id || null,
       recurrence_interval: Math.max(1, Number(form.recurrence_interval) || 1),
       recurrence_daily_mode: form.recurrence_type === 'daily' ? form.recurrence_daily_mode : 'interval',
       recurrence_weekdays: form.recurrence_type === 'weekly'
-        ? normalizeWeekdays(form.recurrence_weekdays, form.due_date ? new Date(`${form.due_date}T12:00:00`).getDay() : new Date().getDay())
+        ? normalizeWeekdays(form.recurrence_weekdays, normalizedDueDate ? new Date(`${normalizedDueDate}T12:00:00`).getDay() : new Date().getDay())
         : null,
       recurrence_end_type: form.recurrence_type === 'none' ? 'never' : form.recurrence_end_type || 'never',
       recurrence_until: form.recurrence_type !== 'none' && form.recurrence_end_type === 'on_date' ? (form.recurrence_until || null) : null,
@@ -337,8 +429,8 @@ function TaskDetail({ task, members, boardColumns, projects, labels: allLabels, 
     let savedTask = task?.id ? { ...task, ...payload } : null;
     if (task?.id) {
       let { error } = await supabase.from('tasks').update(payload).eq('id', task.id);
-      if (error && /(reminder_at|recurrence_)/i.test(error.message || '')) {
-        const { reminder_at, recurrence_type, recurrence_interval, recurrence_weekdays, recurrence_daily_mode, recurrence_end_type, recurrence_until, recurrence_monthly_mode, recurrence_monthly_week, recurrence_monthly_weekday, ...fallbackPayload } = payload;
+      if (error && /(reminder_at|recurrence_|starts_at|ends_at|meeting_link|call_note_template)/i.test(error.message || '')) {
+        const { starts_at, ends_at, meeting_link, call_note_template, recurrence_type, recurrence_interval, recurrence_weekdays, recurrence_daily_mode, recurrence_end_type, recurrence_until, recurrence_monthly_mode, recurrence_monthly_week, recurrence_monthly_weekday, ...fallbackPayload } = payload;
         ({ error } = await supabase.from('tasks').update(fallbackPayload).eq('id', task.id));
       }
       if (error) {
@@ -347,12 +439,12 @@ function TaskDetail({ task, members, boardColumns, projects, labels: allLabels, 
       }
     } else {
       let insertResult = await supabase.from('tasks')
-        .insert({ ...payload, status: 'todo', position: 9999 })
+        .insert({ ...payload, status: 'todo', position: nextTaskPosition })
         .select().single();
-      if (insertResult.error && /(reminder_at|recurrence_)/i.test(insertResult.error.message || '')) {
-        const { reminder_at, recurrence_type, recurrence_interval, recurrence_weekdays, recurrence_daily_mode, recurrence_end_type, recurrence_until, recurrence_monthly_mode, recurrence_monthly_week, recurrence_monthly_weekday, ...fallbackPayload } = payload;
+      if (insertResult.error && /(reminder_at|recurrence_|starts_at|ends_at|meeting_link|call_note_template)/i.test(insertResult.error.message || '')) {
+        const { starts_at, ends_at, meeting_link, call_note_template, recurrence_type, recurrence_interval, recurrence_weekdays, recurrence_daily_mode, recurrence_end_type, recurrence_until, recurrence_monthly_mode, recurrence_monthly_week, recurrence_monthly_weekday, ...fallbackPayload } = payload;
         insertResult = await supabase.from('tasks')
-          .insert({ ...fallbackPayload, status: 'todo', position: 9999 })
+          .insert({ ...fallbackPayload, status: 'todo', position: nextTaskPosition })
           .select().single();
       }
       if (insertResult.error) {
@@ -489,6 +581,16 @@ function TaskDetail({ task, members, boardColumns, projects, labels: allLabels, 
   }
 
   const selectedProject = projects.find(p => p.id === form.project_id);
+  const isCall = form.task_type === 'call';
+  const callDate = datePartFromDateTime(form.starts_at) || form.due_date || '';
+  const callStartTime = timePartFromDateTime(form.starts_at);
+  const callEndTime = timePartFromDateTime(form.ends_at);
+  const nextTaskPosition = useMemo(() => {
+    const targetColumnId = form.column_id || boardColumns[0]?.id || null;
+    const relevantTasks = existingTasks.filter(existingTask => (existingTask.column_id || null) === targetColumnId);
+    if (relevantTasks.length === 0) return 0;
+    return Math.max(...relevantTasks.map(existingTask => Number(existingTask.position) || 0)) + 1;
+  }, [existingTasks, form.column_id, boardColumns]);
   const filteredProjects = projects.filter(p =>
     p.name.toLowerCase().includes(projSearch.toLowerCase()) ||
     p.clients?.name?.toLowerCase().includes(projSearch.toLowerCase())
@@ -496,7 +598,7 @@ function TaskDetail({ task, members, boardColumns, projects, labels: allLabels, 
   const filteredLabels = allLabels.filter(l => l.name.toLowerCase().includes(labelSearch.toLowerCase()));
 
   return (
-    <Modal title={isNew ? 'New Task' : task.title} onClose={onClose} size="lg">
+    <Modal title={isNew ? (isCall ? 'New Call' : 'New Task') : task.title} onClose={onClose} size="lg">
       {/* Timer bar */}
       {!isNew && task?.id && (
         <div className={`flex items-center justify-between p-3 rounded-ios mb-4 -mt-1 ${isTimerActive ? 'bg-red-50 border border-red-100' : 'bg-blue-50 border border-blue-100'}`}>
@@ -605,9 +707,59 @@ function TaskDetail({ task, members, boardColumns, projects, labels: allLabels, 
               </div>
             )}
 
+            <div className="space-y-2">
+              <label className="input-label !mb-0">Type</label>
+              <div className="flex gap-1 rounded-ios bg-ios-fill p-1">
+                {TASK_TYPE_OPTIONS.map(option => {
+                  const active = form.task_type === option.value;
+                  return (
+                    <button
+                      key={option.value}
+                      type="button"
+                      onClick={() => setForm(prev => {
+                        if (option.value === 'call') {
+                          const defaults = prev.starts_at && prev.ends_at
+                            ? { starts_at: prev.starts_at, ends_at: prev.ends_at }
+                            : getDefaultCallWindow();
+                          const startsAt = prev.starts_at || defaults.starts_at;
+                          return {
+                            ...prev,
+                            task_type: 'call',
+                            starts_at: startsAt,
+                            ends_at: prev.ends_at || defaults.ends_at,
+                            due_date: datePartFromDateTime(startsAt),
+                            reminder_at: prev.reminder_at || addMinutesToLocalDateTime(startsAt, -10),
+                          };
+                        }
+                        return {
+                          ...prev,
+                          task_type: 'general',
+                          starts_at: '',
+                          ends_at: '',
+                          meeting_link: '',
+                          call_note_template: '',
+                        };
+                      })}
+                      className={`flex-1 rounded-ios-sm px-3 py-2 text-footnote font-semibold transition-all ${
+                        active ? 'bg-white text-ios-primary shadow-ios-sm' : 'text-ios-secondary'
+                      }`}
+                    >
+                      {option.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
             <div>
               <label className="input-label">Title *</label>
-              <input className="h-12 w-full rounded-ios bg-ios-fill border border-transparent px-3.5 text-body text-ios-primary placeholder:text-ios-tertiary focus:outline-none focus:ring-2 focus:ring-ios-blue/20 focus:border-ios-blue/40" value={form.title} onChange={e => setForm(p => ({ ...p, title: e.target.value }))} placeholder="What needs to be done?" autoFocus={isNew} />
+              <input
+                className="h-12 w-full rounded-ios bg-ios-fill border border-transparent px-3.5 text-body text-ios-primary placeholder:text-ios-tertiary focus:outline-none focus:ring-2 focus:ring-ios-blue/20 focus:border-ios-blue/40"
+                value={form.title}
+                onChange={e => setForm(p => ({ ...p, title: e.target.value }))}
+                placeholder={isCall ? 'Who is the call with?' : 'What needs to be done?'}
+                autoFocus={isNew}
+              />
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
@@ -632,13 +784,104 @@ function TaskDetail({ task, members, boardColumns, projects, labels: allLabels, 
               </div>
             </div>
 
+            {isCall && (
+              <div className="rounded-ios border border-ios-separator/40 bg-ios-bg/60 p-3 space-y-2">
+                <div className="flex items-center gap-2">
+                  <Clock3 className="w-4 h-4 text-ios-blue" />
+                  <p className="text-footnote font-semibold text-ios-primary">Schedule call quickly</p>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                  <div>
+                    <label className="input-label-compact">Date</label>
+                    <input
+                      className="input-compact h-10"
+                      type="date"
+                      value={callDate}
+                      onChange={e => {
+                        const nextDate = e.target.value;
+                        setForm(prev => {
+                          const nextStartsAt = combineDateAndTime(nextDate, timePartFromDateTime(prev.starts_at) || '09:00');
+                          const nextEndsAt = combineDateAndTime(nextDate, timePartFromDateTime(prev.ends_at) || '09:30');
+                          return {
+                            ...prev,
+                            due_date: nextDate,
+                            starts_at: nextStartsAt,
+                            ends_at: nextEndsAt,
+                            reminder_at: prev.reminder_at ? combineDateAndTime(nextDate, timePartFromDateTime(prev.reminder_at)) : addMinutesToLocalDateTime(nextStartsAt, -10),
+                          };
+                        });
+                      }}
+                    />
+                  </div>
+                  <div>
+                    <label className="input-label-compact">Start</label>
+                    <input
+                      className="input-compact h-10"
+                      type="time"
+                      value={callStartTime}
+                      onChange={e => {
+                        const nextTime = e.target.value;
+                        setForm(prev => {
+                          const nextStartsAt = combineDateAndTime(callDate || prev.due_date || datePartFromDateTime(prev.starts_at), nextTime);
+                          return {
+                            ...prev,
+                            due_date: datePartFromDateTime(nextStartsAt),
+                            starts_at: nextStartsAt,
+                            reminder_at: prev.reminder_at ? addMinutesToLocalDateTime(nextStartsAt, -10) : addMinutesToLocalDateTime(nextStartsAt, -10),
+                          };
+                        });
+                      }}
+                    />
+                  </div>
+                  <div>
+                    <label className="input-label-compact">End</label>
+                    <input
+                      className="input-compact h-10"
+                      type="time"
+                      value={callEndTime}
+                      onChange={e => {
+                        const nextTime = e.target.value;
+                        setForm(prev => ({
+                          ...prev,
+                          ends_at: combineDateAndTime(callDate || prev.due_date || datePartFromDateTime(prev.starts_at), nextTime),
+                        }));
+                      }}
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
+
             <div>
               <div className="flex items-center justify-between gap-3 mb-1">
                 <label className="input-label !mb-0">Description</label>
                 <span className="text-caption2 text-ios-tertiary">Optional</span>
               </div>
-              <textarea className="min-h-[76px] w-full rounded-ios bg-ios-fill border border-transparent px-3.5 py-3 text-body text-ios-primary placeholder:text-ios-tertiary focus:outline-none focus:ring-2 focus:ring-ios-blue/20 focus:border-ios-blue/40" rows={2} value={form.description} onChange={e => setForm(p => ({ ...p, description: e.target.value }))} placeholder="Context, links, notes..." />
+              <textarea className="min-h-[76px] w-full rounded-ios bg-ios-fill border border-transparent px-3.5 py-3 text-body text-ios-primary placeholder:text-ios-tertiary focus:outline-none focus:ring-2 focus:ring-ios-blue/20 focus:border-ios-blue/40" rows={2} value={form.description} onChange={e => setForm(p => ({ ...p, description: e.target.value }))} placeholder={isCall ? 'Agenda, key goals, prep notes...' : 'Context, links, notes...'} />
             </div>
+
+            {isCall && (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                <div>
+                  <label className="input-label-compact">Meeting link</label>
+                  <input
+                    className="input-compact h-10"
+                    value={form.meeting_link}
+                    onChange={e => setForm(p => ({ ...p, meeting_link: e.target.value }))}
+                    placeholder="https://meet.google.com/..."
+                  />
+                </div>
+                <div>
+                  <label className="input-label-compact">Call note prompt</label>
+                  <input
+                    className="input-compact h-10"
+                    value={form.call_note_template}
+                    onChange={e => setForm(p => ({ ...p, call_note_template: e.target.value }))}
+                    placeholder="Follow-up, blockers, next steps..."
+                  />
+                </div>
+              </div>
+            )}
 
             <div className="space-y-2">
               <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
@@ -705,8 +948,30 @@ function TaskDetail({ task, members, boardColumns, projects, labels: allLabels, 
                   )}
                 </div>
                 <div>
-                  <label className="input-label-compact flex items-center gap-1.5"><Timer className="w-3.5 h-3.5 text-ios-tertiary" />Due date</label>
-                  <input className="input-compact h-10" type="date" value={form.due_date} onChange={e => setForm(p => ({ ...p, due_date: e.target.value }))} />
+                  <label className="input-label-compact flex items-center gap-1.5"><Timer className="w-3.5 h-3.5 text-ios-tertiary" />{isCall ? 'Date' : 'Due date'}</label>
+                  <input
+                    className="input-compact h-10"
+                    type="date"
+                    value={isCall ? callDate : form.due_date}
+                    onChange={e => {
+                      const nextDate = e.target.value;
+                      if (isCall) {
+                        setForm(prev => {
+                          const nextStartsAt = combineDateAndTime(nextDate, timePartFromDateTime(prev.starts_at) || '09:00');
+                          const nextEndsAt = combineDateAndTime(nextDate, timePartFromDateTime(prev.ends_at) || '09:30');
+                          return {
+                            ...prev,
+                            due_date: nextDate,
+                            starts_at: nextStartsAt,
+                            ends_at: nextEndsAt,
+                            reminder_at: prev.reminder_at ? combineDateAndTime(nextDate, timePartFromDateTime(prev.reminder_at)) : addMinutesToLocalDateTime(nextStartsAt, -10),
+                          };
+                        });
+                        return;
+                      }
+                      setForm(p => ({ ...p, due_date: nextDate }));
+                    }}
+                  />
                 </div>
                 <div>
                   <label className="input-label-compact flex items-center gap-1.5"><Bell className="w-3.5 h-3.5 text-ios-tertiary" />Reminder</label>
@@ -940,10 +1205,10 @@ function TaskDetail({ task, members, boardColumns, projects, labels: allLabels, 
             )}
             {task?.id && (
               <button
-                onClick={() => window.location.assign(`/dashboard/notes?project=${form.project_id || task.project_id || ''}&task=${task.id}&newNote=1`)}
+                onClick={() => window.location.assign(`/dashboard/notes?project=${form.project_id || task.project_id || ''}&task=${task.id}&newNote=1${isCall ? '&source=call' : ''}`)}
                 className="btn-secondary flex items-center gap-1.5 text-footnote"
               >
-                <Tag className="w-3.5 h-3.5" /> Notes
+                <Tag className="w-3.5 h-3.5" /> {isCall ? 'Call notes' : 'Notes'}
               </button>
             )}
             {task?.id && (
@@ -1120,6 +1385,7 @@ function TaskRow({ task, members, boardColumns, taskLabels, activeTimer, elapsed
   const col = boardColumns.find(c => c.id === task.column_id);
   const labels = taskLabels[task.id] || [];
   const isTimerActive = activeTimer?.task_id === task.id;
+  const isCall = task.task_type === 'call';
 
   return (
     <div onClick={onOpen}
@@ -1145,10 +1411,13 @@ function TaskRow({ task, members, boardColumns, taskLabels, activeTimer, elapsed
       </div>
       {col && <span className="text-caption2 font-semibold px-2 py-0.5 rounded-full shrink-0 hidden lg:inline" style={{ background: col.color+'25', color: col.color }}>{col.name}</span>}
       <div className="flex items-center gap-2 shrink-0">
+        {isCall && <div className="flex items-center gap-0.5 text-ios-blue"><Clock3 className="w-3 h-3" /><span className="text-caption2">Call</span></div>}
         {task.comment_count > 0 && <div className="flex items-center gap-0.5 text-ios-tertiary"><MessageSquare className="w-3 h-3" /><span className="text-caption2">{task.comment_count}</span></div>}
         {task.reminder_at && !done && <div className="flex items-center gap-0.5 text-ios-orange"><Bell className="w-3 h-3" /><span className="text-caption2">Reminder</span></div>}
         {task.recurrence_type && task.recurrence_type !== 'none' && <div className="flex items-center gap-0.5 text-ios-blue"><Repeat2 className="w-3 h-3" /><span className="text-caption2">Repeat</span></div>}
-        {task.due_date && <span className={`text-caption1 font-medium ${isOverdue ? 'text-ios-red' : 'text-ios-tertiary'}`}>{new Date(task.due_date).toLocaleDateString('en-US',{day:'numeric',month:'short'})}</span>}
+        {isCall && task.starts_at
+          ? <span className="text-caption1 font-medium text-ios-secondary">{new Date(task.starts_at).toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'})}</span>
+          : task.due_date && <span className={`text-caption1 font-medium ${isOverdue ? 'text-ios-red' : 'text-ios-tertiary'}`}>{new Date(task.due_date).toLocaleDateString('en-US',{day:'numeric',month:'short'})}</span>}
         <QuickTimer task={task} activeTimer={activeTimer} elapsed={elapsed} isPaused={isPaused} onStart={onStartTimer} onStop={onStopTimer} onPause={onPauseTimer} />
         {/* Quick archive button */}
         <button onClick={e => { e.stopPropagation(); onQuickArchive(); }}
@@ -1177,7 +1446,11 @@ export default function TasksPage() {
   const urlMode = searchParams.get('mode') || '';
   const urlTaskId = searchParams.get('task') || '';
   const urlTab = searchParams.get('tab') || '';
+  const urlNewCall = searchParams.get('newCall') === '1';
+  const urlStartsAt = searchParams.get('startsAt') || '';
+  const urlEndsAt = searchParams.get('endsAt') || '';
   const taskOpenProcessedRef = useRef(false);
+  const newCallProcessedRef = useRef(false);
   // Persist view in localStorage
   const [mode, setMode] = useState(() => {
     try { return localStorage.getItem(VIEW_KEY) || 'list'; } catch { return 'list'; }
@@ -1314,6 +1587,24 @@ export default function TasksPage() {
     else updateMode('list');
     router.replace('/dashboard/tasks');
   }, [tasksLoaded, urlTaskId, urlMode, tasks, archivedTasks]);
+
+  useEffect(() => {
+    if (!tasksLoaded || !urlNewCall || newCallProcessedRef.current) return;
+    newCallProcessedRef.current = true;
+    const startsAt = urlStartsAt ? toDateTimeLocalValue(urlStartsAt) : '';
+    const endsAt = urlEndsAt ? toDateTimeLocalValue(urlEndsAt) : '';
+    setTaskModal({
+      task_type: 'call',
+      assigned_to: viewingUserId || currentUser?.id || '',
+      project_id: urlProjectId || '',
+      starts_at: startsAt,
+      ends_at: endsAt,
+      due_date: startsAt ? datePartFromDateTime(startsAt) : '',
+      reminder_at: startsAt ? addMinutesToLocalDateTime(startsAt, -10) : '',
+    });
+    updateMode('list');
+    router.replace('/dashboard/tasks');
+  }, [tasksLoaded, urlNewCall, urlProjectId, urlStartsAt, urlEndsAt, viewingUserId, currentUser, router]);
 
   async function loadAll(targetUserId) {
     const accessInfo = await getProjectAccess({ forceRefresh: true });
@@ -1618,9 +1909,14 @@ export default function TasksPage() {
               <ArrowLeft className="w-3.5 h-3.5" /> Back
             </button>
           ) : (
-            <button onClick={() => setTaskModal({})} className="btn-primary flex items-center gap-1.5">
-              <Plus className="w-4 h-4" strokeWidth={2.5} /> New Task
-            </button>
+            <>
+              <button onClick={() => setTaskModal({})} className="btn-primary flex items-center gap-1.5">
+                <Plus className="w-4 h-4" strokeWidth={2.5} /> New Task
+              </button>
+              <button onClick={() => setTaskModal({ task_type: 'call' })} className="btn-secondary flex items-center gap-1.5 text-footnote">
+                <Clock3 className="w-3.5 h-3.5" /> New Call
+              </button>
+            </>
           )}
           {/* Column button — only in board */}
           {mode === 'board' && (
@@ -1733,7 +2029,10 @@ export default function TasksPage() {
           {Object.keys(byProject).length === 0 ? (
             <div className="p-12 text-center">
               <p className="text-subhead text-ios-secondary mb-4">{hasFilters ? 'No tasks match filters' : 'No tasks yet'}</p>
-              <button onClick={() => setTaskModal({})} className="btn-primary">New Task</button>
+              <div className="flex items-center justify-center gap-2">
+                <button onClick={() => setTaskModal({})} className="btn-primary">New Task</button>
+                <button onClick={() => setTaskModal({ task_type: 'call' })} className="btn-secondary">New Call</button>
+              </div>
             </div>
           ) : Object.entries(byProject).map(([pid, { project, tasks: projTasks }]) => {
             const openTasks = projTasks.filter(t => t.status!=='done');
@@ -1891,6 +2190,7 @@ export default function TasksPage() {
                     const labels = taskLabels[task.id]||[];
                     const isDone = task.status==='done';
                     const isTimerActive = activeTimer?.task_id===task.id;
+                    const isCall = task.task_type === 'call';
                     return (
                       <div key={task.id} draggable
                         onDragStart={e => { e.dataTransfer.setData('taskId', task.id); setDragTaskId(task.id); autoScrollColumnIdRef.current = col.id; }}
@@ -1965,6 +2265,11 @@ export default function TasksPage() {
                                 <MessageSquare className="w-3 h-3"/><span className="text-[10px]">{task.comment_count}</span>
                               </div>
                             )}
+                            {isCall && (
+                              <div className="flex items-center gap-0.5 text-ios-blue shrink-0">
+                                <Clock3 className="w-3 h-3"/><span className="text-[10px]">Call</span>
+                              </div>
+                            )}
                             {task.reminder_at && !isDone && (
                               <div className="flex items-center gap-0.5 text-ios-orange shrink-0">
                                 <Bell className="w-3 h-3"/><span className="text-[10px]">Reminder</span>
@@ -1980,7 +2285,9 @@ export default function TasksPage() {
                             )}
                           </div>
                           <div className="flex items-center gap-1 shrink-0">
-                            {task.due_date && <span className="text-[10px] text-ios-tertiary">{new Date(task.due_date).toLocaleDateString('en-US',{day:'numeric',month:'short'})}</span>}
+                            {isCall && task.starts_at
+                              ? <span className="text-[10px] text-ios-tertiary">{new Date(task.starts_at).toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'})}</span>
+                              : task.due_date && <span className="text-[10px] text-ios-tertiary">{new Date(task.due_date).toLocaleDateString('en-US',{day:'numeric',month:'short'})}</span>}
                             {assignee && (assignee.avatar_url ? (
                               <img src={assignee.avatar_url} alt="avatar" className="w-5 h-5 rounded-full object-cover shrink-0" />
                             ) : (
@@ -2090,7 +2397,7 @@ export default function TasksPage() {
 
       {/* Modals */}
       {taskModal !== null && (
-        <TaskDetail task={taskModal} members={members} boardColumns={boardColumns} projects={projects} labels={labels}
+        <TaskDetail task={taskModal} members={members} boardColumns={boardColumns} projects={projects} labels={labels} existingTasks={tasks}
           activeTimer={activeTimer} elapsed={elapsed} currentUser={currentUser}
           actorProfile={userProfile}
           initialTab={urlTab === 'comments' ? 'comments' : undefined}

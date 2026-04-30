@@ -371,8 +371,11 @@ export default function TimerPage() {
                     {projects.filter(p => p.name.toLowerCase().includes(pastProjSearch.toLowerCase())).map(p => (
                       <button key={p.id} onClick={() => { setPastForm({...pastForm, project_id: p.id}); setPastProjSearch(''); }}
                         className="flex items-center w-full px-3 py-2.5 hover:bg-ios-fill text-left gap-2">
-                        <div className="w-2 h-2 rounded-full" style={{background: p.color||'#007AFF'}} />
-                        <span className="text-subhead">{p.name}</span>
+                        <div className="w-2 h-2 rounded-full shrink-0" style={{background: p.color||'#007AFF'}} />
+                        <div>
+                          <p className="text-subhead font-medium">{p.name}</p>
+                          {p.clients?.name && <p className="text-caption1 text-ios-secondary">{p.clients.name}</p>}
+                        </div>
                       </button>
                     ))}
                   </div>
