@@ -184,6 +184,12 @@ export default function ClientHealthPage() {
     return filteredItems.filter(item => !item.health.is_unset).slice(0, 4);
   }, [filter, filteredItems, topNeedsAttention]);
 
+  const remainingItems = useMemo(() => {
+    if (!featuredItems.length) return filteredItems;
+    const featuredIds = new Set(featuredItems.map(item => item.id));
+    return filteredItems.filter(item => !featuredIds.has(item.id));
+  }, [featuredItems, filteredItems]);
+
   const overviewInsights = useMemo(() => {
     const reviewedItems = items.filter(item => !item.health.is_unset);
     const communicationRisk = reviewedItems.filter(item => item.health.insight === 'Communication risk').length;
@@ -488,16 +494,28 @@ export default function ClientHealthPage() {
 
       <div className="space-y-3">
         <div>
-          <p className="text-headline font-semibold text-ios-primary">{activeFilterLabel}</p>
-          <p className="text-footnote text-ios-secondary">Direct clients and white label projects, with the clearest pulse first.</p>
+          <p className="text-headline font-semibold text-ios-primary">
+            {remainingItems.length ? `More in ${activeFilterLabel.toLowerCase()}` : activeFilterLabel}
+          </p>
+          <p className="text-footnote text-ios-secondary">
+            {remainingItems.length
+              ? 'Everything else in this view, after the top priorities above.'
+              : featuredItems.length
+                ? 'These are the only relationships in this view right now.'
+                : 'Direct clients and white label projects, with the clearest pulse first.'}
+          </p>
         </div>
         {loading ? (
           <div className="card p-8 text-center text-ios-secondary text-footnote">Loading Client Health...</div>
         ) : filteredItems.length === 0 ? (
           <div className="card p-8 text-center text-ios-secondary text-footnote">No relationships match the current filters.</div>
+        ) : remainingItems.length === 0 ? (
+          <div className="card p-8 text-center text-ios-secondary text-footnote">
+            Nothing else is hiding below. The priority cards above are the full picture for this view.
+          </div>
         ) : (
           <div className="grid xl:grid-cols-2 gap-4">
-            {filteredItems.map(item => (
+            {remainingItems.map(item => (
               <ClientHealthSummaryCard
                 key={item.id}
                 title={item.name}
