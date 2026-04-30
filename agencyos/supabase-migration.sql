@@ -259,6 +259,104 @@ CREATE POLICY "team_moments_admin_insert" ON team_moments
     )
   );
 
+-- Client Health: managerial relationship pulse for direct clients and white-label projects
+CREATE TABLE IF NOT EXISTS client_health (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  scope_type TEXT NOT NULL CHECK (scope_type IN ('client', 'project')),
+  scope_id UUID NOT NULL,
+  current_state TEXT NOT NULL DEFAULT 'good' CHECK (current_state IN ('poor', 'fragile', 'good', 'excellent')),
+  future_outlook TEXT NOT NULL DEFAULT 'solid' CHECK (future_outlook IN ('low', 'uncertain', 'solid', 'strong')),
+  actual_results TEXT NOT NULL DEFAULT 'good' CHECK (actual_results IN ('weak', 'mixed', 'good', 'strong')),
+  summary_note TEXT,
+  insight TEXT,
+  focus_area TEXT,
+  updated_by UUID REFERENCES profiles(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(scope_type, scope_id)
+);
+
+CREATE TABLE IF NOT EXISTS client_health_history (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  client_health_id UUID REFERENCES client_health(id) ON DELETE CASCADE,
+  scope_type TEXT NOT NULL CHECK (scope_type IN ('client', 'project')),
+  scope_id UUID NOT NULL,
+  current_state TEXT NOT NULL,
+  future_outlook TEXT NOT NULL,
+  actual_results TEXT NOT NULL,
+  summary_note TEXT,
+  insight TEXT,
+  focus_area TEXT,
+  updated_by UUID REFERENCES profiles(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_client_health_scope ON client_health(scope_type, scope_id);
+CREATE INDEX IF NOT EXISTS idx_client_health_current_state ON client_health(current_state);
+CREATE INDEX IF NOT EXISTS idx_client_health_history_scope ON client_health_history(scope_type, scope_id, created_at DESC);
+
+GRANT SELECT, INSERT, UPDATE, DELETE ON client_health TO authenticated;
+GRANT SELECT, INSERT ON client_health_history TO authenticated;
+
+ALTER TABLE client_health ENABLE ROW LEVEL SECURITY;
+ALTER TABLE client_health_history ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "client_health_manager_read" ON client_health;
+CREATE POLICY "client_health_manager_read" ON client_health
+  FOR SELECT
+  USING (
+    EXISTS (
+      SELECT 1 FROM profiles
+      WHERE profiles.id = auth.uid()
+        AND profiles.role IN ('admin', 'manager')
+        AND COALESCE(profiles.is_deleted, FALSE) = FALSE
+    )
+  );
+
+DROP POLICY IF EXISTS "client_health_manager_write" ON client_health;
+CREATE POLICY "client_health_manager_write" ON client_health
+  FOR ALL
+  USING (
+    EXISTS (
+      SELECT 1 FROM profiles
+      WHERE profiles.id = auth.uid()
+        AND profiles.role IN ('admin', 'manager')
+        AND COALESCE(profiles.is_deleted, FALSE) = FALSE
+    )
+  )
+  WITH CHECK (
+    EXISTS (
+      SELECT 1 FROM profiles
+      WHERE profiles.id = auth.uid()
+        AND profiles.role IN ('admin', 'manager')
+        AND COALESCE(profiles.is_deleted, FALSE) = FALSE
+    )
+  );
+
+DROP POLICY IF EXISTS "client_health_history_manager_read" ON client_health_history;
+CREATE POLICY "client_health_history_manager_read" ON client_health_history
+  FOR SELECT
+  USING (
+    EXISTS (
+      SELECT 1 FROM profiles
+      WHERE profiles.id = auth.uid()
+        AND profiles.role IN ('admin', 'manager')
+        AND COALESCE(profiles.is_deleted, FALSE) = FALSE
+    )
+  );
+
+DROP POLICY IF EXISTS "client_health_history_manager_insert" ON client_health_history;
+CREATE POLICY "client_health_history_manager_insert" ON client_health_history
+  FOR INSERT
+  WITH CHECK (
+    EXISTS (
+      SELECT 1 FROM profiles
+      WHERE profiles.id = auth.uid()
+        AND profiles.role IN ('admin', 'manager')
+        AND COALESCE(profiles.is_deleted, FALSE) = FALSE
+    )
+  );
+
 DROP POLICY IF EXISTS "team_moments_admin_update" ON team_moments;
 CREATE POLICY "team_moments_admin_update" ON team_moments
   FOR UPDATE

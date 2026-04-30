@@ -4,10 +4,12 @@ import { supabase } from '@/lib/supabase';
 import { fmtDuration, parseUTC } from '@/lib/utils';
 import { getProjectAccess, visibleClientIdsFromProjects } from '@/lib/projectAccess';
 import { ensureBillingReminderNotifications, ensureLeadReminderNotifications } from '@/lib/notifications';
+import { getHealthBucket, getHealthTone, isWhiteLabelClient } from '@/lib/clientHealth';
+import { loadHealthMap } from '@/lib/clientHealthStore';
 import Modal from '@/components/Modal';
 import { MOMENT_STYLES } from '@/components/TeamMomentOverlay';
 import Link from 'next/link';
-import { ArrowRight, Clock, Plus, Sparkles } from 'lucide-react';
+import { ArrowRight, Clock, Plus, Sparkles, HeartPulse } from 'lucide-react';
 
 function greeting() {
   const h = new Date().getHours();
@@ -68,6 +70,7 @@ export default function DashboardPage() {
   const [todayByProject, setTodayByProject] = useState([]);
   const [todayTotal, setTodayTotal] = useState(0);
   const [weekByProject, setWeekByProject] = useState([]);
+  const [healthNeedsAttention, setHealthNeedsAttention] = useState([]);
   const [composerOpen, setComposerOpen] = useState(false);
   const [momentSaving, setMomentSaving] = useState(false);
   const [momentFeedback, setMomentFeedback] = useState('');
@@ -114,6 +117,41 @@ export default function DashboardPage() {
     if (accessInfo.isRestricted) projectQuery = projectQuery.in('id', visibleProjectIds);
     const { data: visibleProjects } = await projectQuery;
     if (accessInfo.isRestricted) visibleClientIds = visibleClientIdsFromProjects(visibleProjects || []);
+
+    if (accessInfo.role === 'admin' || accessInfo.role === 'manager') {
+      const { data: healthProjectsRaw } = await supabase
+        .from('projects')
+        .select('id,name,client_id,clients(name,client_type,type)')
+        .eq('status', 'active');
+      const healthProjects = accessInfo.isRestricted
+        ? (healthProjectsRaw || []).filter(project => accessInfo.projectIds.includes(project.id))
+        : (healthProjectsRaw || []);
+
+      let healthClientsQuery = supabase.from('clients').select('id,name,client_type,type').order('name');
+      if (accessInfo.isRestricted) {
+        const ids = visibleClientIds || [];
+        healthClientsQuery = ids.length ? healthClientsQuery.in('id', ids) : null;
+      }
+      const { data: healthClientsRaw } = healthClientsQuery ? await healthClientsQuery : { data: [] };
+      const healthClients = (healthClientsRaw || []).filter(client => !isWhiteLabelClient(client));
+      const whiteLabelProjects = healthProjects.filter(project => isWhiteLabelClient(project.clients));
+      const [clientHealthMap, projectHealthMap] = await Promise.all([
+        loadHealthMap('client', healthClients.map(client => client.id)),
+        loadHealthMap('project', whiteLabelProjects.map(project => project.id)),
+      ]);
+      const healthItems = [
+        ...healthClients.map(client => ({ type: 'client', name: client.name, health: clientHealthMap[client.id] })),
+        ...whiteLabelProjects.map(project => ({ type: 'project', name: project.name, clientName: project.clients?.name, health: projectHealthMap[project.id] })),
+      ].filter(item => item.health && ['needs_attention', 'fragile'].includes(getHealthBucket(item.health.current_state)))
+        .sort((a, b) => {
+          const order = { needs_attention: 0, fragile: 1, stable: 2, great: 3 };
+          return order[getHealthBucket(a.health.current_state)] - order[getHealthBucket(b.health.current_state)];
+        })
+        .slice(0, 4);
+      setHealthNeedsAttention(healthItems);
+    } else {
+      setHealthNeedsAttention([]);
+    }
 
     let todayQ = supabase.from('time_entries').select('duration_seconds,project_id,projects(name,color),start_time').eq('user_id',user.id).not('end_time','is',null).gte('start_time',todayStart);
     let weekQ = supabase.from('time_entries').select('duration_seconds,project_id,projects(name,color),start_time').eq('user_id',user.id).not('end_time','is',null).gte('start_time',weekStart);
@@ -333,6 +371,48 @@ export default function DashboardPage() {
                   );
                 })}
               </div>
+            </div>
+          )}
+
+          {(role === 'admin' || role === 'manager') && (
+            <div className="card p-5">
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <p className="text-headline font-semibold text-ios-primary">Client Health</p>
+                  <p className="text-footnote text-ios-secondary">Relationships that need a closer look.</p>
+                </div>
+                <Link href="/dashboard/client-health" className="text-caption1 text-ios-blue font-semibold flex items-center gap-0.5">
+                  Open <ArrowRight className="w-3 h-3" />
+                </Link>
+              </div>
+              {healthNeedsAttention.length === 0 ? (
+                <div className="rounded-ios-xl bg-ios-fill/60 px-4 py-6 text-center">
+                  <HeartPulse className="w-6 h-6 text-ios-label4 mx-auto mb-2" />
+                  <p className="text-footnote text-ios-secondary">No urgent relationship risks right now.</p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {healthNeedsAttention.map((item, index) => {
+                    const tone = getHealthTone(item.health.current_state);
+                    return (
+                      <div key={`${item.name}-${index}`} className="rounded-ios-xl border border-ios-separator/40 bg-white px-4 py-3">
+                        <div className="flex items-center justify-between gap-3 mb-1.5">
+                          <div className="min-w-0">
+                            <p className="text-subhead font-semibold text-ios-primary truncate">{item.name}</p>
+                            <p className="text-caption1 text-ios-tertiary truncate">
+                              {item.type === 'project' ? `White label${item.clientName ? ` · ${item.clientName}` : ''}` : 'Direct client'}
+                            </p>
+                          </div>
+                          <span className={`px-2.5 py-1 rounded-full text-caption1 font-semibold border ${tone.badge}`}>
+                            {item.health.current_state === 'poor' ? 'Needs attention' : 'Fragile'}
+                          </span>
+                        </div>
+                        <p className="text-footnote text-ios-secondary">{item.health.insight}</p>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           )}
         </div>

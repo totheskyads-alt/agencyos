@@ -6,6 +6,9 @@ import { useRole } from '@/lib/useRole';
 import { getProjectAccess, grantProjectAccess, visibleClientIdsFromProjects } from '@/lib/projectAccess';
 import { createProjectAssignedNotification } from '@/lib/notifications';
 import { fmtDuration, fmtCurrency } from '@/lib/utils';
+import { createEmptyHealth, isWhiteLabelClient } from '@/lib/clientHealth';
+import { loadHealthMap, saveHealthRecord } from '@/lib/clientHealthStore';
+import ClientHealthSheet from '@/components/ClientHealthSheet';
 import { Plus, Search, Euro, Trash2, ChevronDown, FolderOpen, Archive } from 'lucide-react';
 import { useSearchParams } from 'next/navigation';
 
@@ -37,13 +40,18 @@ export default function ProjectsPage() {
   const [clientForm, setClientForm] = useState(emptyClient);
   const [savingClient, setSavingClient] = useState(false);
   const [selectedMemberIds, setSelectedMemberIds] = useState([]);
+  const [healthMap, setHealthMap] = useState({});
+  const [healthSheetOpen, setHealthSheetOpen] = useState(false);
+  const [healthSaving, setHealthSaving] = useState(false);
+  const [selectedHealthProject, setSelectedHealthProject] = useState(null);
   const searchParams = useSearchParams();
   const clientFilter = searchParams.get('client') || '';
   const projectFilter = searchParams.get('project') || '';
   const { isAdmin, can } = useRole();
   const canManageProjects = can('canManageProjects');
+  const canViewClientHealth = can('canViewClientHealth');
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [canViewClientHealth]);
   useEffect(() => {
     if (!clientFilter || clients.length === 0) return;
     const client = clients.find(c => c.id === clientFilter);
@@ -63,7 +71,7 @@ export default function ProjectsPage() {
     const accessInfo = await getProjectAccess();
     setAccess(accessInfo);
 
-    let projectQuery = supabase.from('projects').select('*, clients(name)').order('created_at',{ascending:false});
+    let projectQuery = supabase.from('projects').select('*, clients(name,client_type,type)').order('created_at',{ascending:false});
     if (accessInfo.isRestricted) {
       if (accessInfo.projectIds.length === 0) {
         setProjects([]);
@@ -87,6 +95,11 @@ export default function ProjectsPage() {
     setProjects(visibleProjects);
     setClients(cli || []);
     setMembers(mem || []);
+    if (canViewClientHealth) {
+      const whiteLabelProjects = visibleProjects.filter(project => isWhiteLabelClient(project.clients));
+      const map = await loadHealthMap('project', whiteLabelProjects.map(project => project.id));
+      setHealthMap(map);
+    }
 
     let entriesQuery = supabase.from('time_entries').select('project_id,duration_seconds').not('end_time','is',null);
     if (accessInfo.isRestricted) entriesQuery = entriesQuery.in('project_id', accessInfo.projectIds);
@@ -187,6 +200,29 @@ export default function ProjectsPage() {
     if (!confirm('Delete this project?')) return;
     await supabase.from('projects').delete().eq('id', id);
     setModal(false); load();
+  }
+
+  function openHealth(project, e) {
+    e?.stopPropagation?.();
+    setSelectedHealthProject(project);
+    setHealthSheetOpen(true);
+  }
+
+  async function saveHealth(healthPayload) {
+    setHealthSaving(true);
+    const { data: { session } } = await supabase.auth.getSession();
+    const userId = session?.user?.id;
+    const previous = selectedHealthProject ? healthMap[selectedHealthProject.id] : null;
+    const { data, error } = await saveHealthRecord(healthPayload, userId, previous);
+    setHealthSaving(false);
+    if (error) {
+      alert(`Client Health could not be saved yet: ${error.message || 'Run the SQL migration first.'}`);
+      return;
+    }
+    if (selectedHealthProject && data) {
+      setHealthMap(prev => ({ ...prev, [selectedHealthProject.id]: data }));
+    }
+    setHealthSheetOpen(false);
   }
 
   async function toggleArchive(p, e) {
@@ -301,6 +337,24 @@ export default function ProjectsPage() {
                         {p.billing_day && <p className="text-footnote text-ios-tertiary">Day {p.billing_day}</p>}
                         {p.monthly_amount && isAdmin && <p className="text-footnote text-ios-green font-semibold">{fmtCurrency(p.monthly_amount)}/mo</p>}
                         {stats[p.id] > 0 && <p className="text-footnote text-ios-secondary">{fmtDuration(stats[p.id])} tracked</p>}
+                        {canViewClientHealth && isWhiteLabelClient(p.clients) && (
+                          <button
+                            type="button"
+                            onClick={(e) => openHealth(p, e)}
+                            className="inline-flex items-center gap-2 px-2.5 py-1 rounded-full bg-ios-fill text-caption1 font-semibold text-ios-secondary hover:bg-ios-fill2 transition-colors"
+                          >
+                            <span className={`w-2 h-2 rounded-full ${
+                              (healthMap[p.id]?.current_state || 'good') === 'poor'
+                                ? 'bg-red-400'
+                                : (healthMap[p.id]?.current_state || 'good') === 'fragile'
+                                  ? 'bg-amber-400'
+                                  : (healthMap[p.id]?.current_state || 'good') === 'excellent'
+                                    ? 'bg-green-500'
+                                    : 'bg-ios-blue'
+                            }`} />
+                            {healthMap[p.id]?.insight || 'Not reviewed yet'}
+                          </button>
+                        )}
                       </div>
                     </div>
                     <div className="flex items-center gap-2 shrink-0" onClick={e => e.stopPropagation()}>
@@ -522,6 +576,21 @@ export default function ProjectsPage() {
           </div>
         </Modal>
       )}
+
+      <ClientHealthSheet
+        open={healthSheetOpen}
+        onClose={() => setHealthSheetOpen(false)}
+        onSave={saveHealth}
+        entityLabel={selectedHealthProject ? `${selectedHealthProject.name}${selectedHealthProject.clients?.name ? ` · ${selectedHealthProject.clients.name}` : ''}` : ''}
+        scopeType="project"
+        scopeId={selectedHealthProject?.id || ''}
+        initialHealth={selectedHealthProject ? (healthMap[selectedHealthProject.id] || {
+          ...createEmptyHealth('project', selectedHealthProject.id),
+          insight: 'Not reviewed yet',
+          is_unset: true,
+        }) : null}
+        loading={healthSaving}
+      />
     </div>
   );
 }

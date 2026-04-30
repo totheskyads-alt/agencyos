@@ -5,6 +5,9 @@ import Modal from '@/components/Modal';
 import { useRole } from '@/lib/useRole';
 import { getProjectAccess, visibleClientIdsFromProjects } from '@/lib/projectAccess';
 import { fmtDuration, fmtCurrency } from '@/lib/utils';
+import { createEmptyHealth, isWhiteLabelClient } from '@/lib/clientHealth';
+import { loadHealthMap, saveHealthRecord } from '@/lib/clientHealthStore';
+import ClientHealthSheet from '@/components/ClientHealthSheet';
 import { Plus, Search, ChevronRight, Mail, Phone } from 'lucide-react';
 
 const CLIENT_TYPES = {
@@ -26,10 +29,15 @@ export default function ClientsPage() {
   const [selected, setSelected] = useState(null);
   const [form, setForm] = useState(empty);
   const [loading, setLoading] = useState(false);
+  const [healthMap, setHealthMap] = useState({});
+  const [healthSheetOpen, setHealthSheetOpen] = useState(false);
+  const [healthSaving, setHealthSaving] = useState(false);
+  const [selectedHealthClient, setSelectedHealthClient] = useState(null);
   const { can } = useRole();
   const canManageClients = can('canManageClients');
+  const canViewClientHealth = can('canViewClientHealth');
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [canViewClientHealth]);
 
   async function load() {
     const accessInfo = await getProjectAccess();
@@ -63,6 +71,11 @@ export default function ClientsPage() {
     }
     const { data } = await clientQuery;
     setClients(data || []);
+    if (canViewClientHealth) {
+      const directClients = (data || []).filter(client => !isWhiteLabelClient(client));
+      const map = await loadHealthMap('client', directClients.map(client => client.id));
+      setHealthMap(map);
+    }
 
     // Time stats this month
     const monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString();
@@ -108,6 +121,29 @@ export default function ClientsPage() {
     if (!confirm('Delete this client?')) return;
     await supabase.from('clients').delete().eq('id', id);
     setModal(false); load();
+  }
+
+  function openHealth(client, e) {
+    e?.stopPropagation?.();
+    setSelectedHealthClient(client);
+    setHealthSheetOpen(true);
+  }
+
+  async function saveHealth(healthPayload) {
+    setHealthSaving(true);
+    const { data: { session } } = await supabase.auth.getSession();
+    const userId = session?.user?.id;
+    const previous = selectedHealthClient ? healthMap[selectedHealthClient.id] : null;
+    const { data, error } = await saveHealthRecord(healthPayload, userId, previous);
+    setHealthSaving(false);
+    if (error) {
+      alert(`Client Health could not be saved yet: ${error.message || 'Run the SQL migration first.'}`);
+      return;
+    }
+    if (selectedHealthClient && data) {
+      setHealthMap(prev => ({ ...prev, [selectedHealthClient.id]: data }));
+    }
+    setHealthSheetOpen(false);
   }
 
   const filtered = clients.filter(c => {
@@ -168,6 +204,24 @@ export default function ClientsPage() {
                       <div>
                         <p className="text-subhead font-semibold text-ios-primary">{c.name}</p>
                         {c.company && <p className="text-footnote text-ios-secondary">{c.company}</p>}
+                        {canViewClientHealth && !isWhiteLabelClient(c) && (
+                          <button
+                            type="button"
+                            onClick={(e) => openHealth(c, e)}
+                            className="mt-1 inline-flex items-center gap-2 px-2.5 py-1 rounded-full bg-ios-fill text-caption1 font-semibold text-ios-secondary hover:bg-ios-fill2 transition-colors"
+                          >
+                            <span className={`w-2 h-2 rounded-full ${
+                              (healthMap[c.id]?.current_state || 'good') === 'poor'
+                                ? 'bg-red-400'
+                                : (healthMap[c.id]?.current_state || 'good') === 'fragile'
+                                  ? 'bg-amber-400'
+                                  : (healthMap[c.id]?.current_state || 'good') === 'excellent'
+                                    ? 'bg-green-500'
+                                    : 'bg-ios-blue'
+                            }`} />
+                            {healthMap[c.id]?.insight || 'Not reviewed yet'}
+                          </button>
+                        )}
                       </div>
                     </div>
                     <ChevronRight className="w-4 h-4 text-ios-tertiary shrink-0" />
@@ -234,6 +288,21 @@ export default function ClientsPage() {
           </div>
         </Modal>
       )}
+
+      <ClientHealthSheet
+        open={healthSheetOpen}
+        onClose={() => setHealthSheetOpen(false)}
+        onSave={saveHealth}
+        entityLabel={selectedHealthClient?.name || ''}
+        scopeType="client"
+        scopeId={selectedHealthClient?.id || ''}
+        initialHealth={selectedHealthClient ? (healthMap[selectedHealthClient.id] || {
+          ...createEmptyHealth('client', selectedHealthClient.id),
+          insight: 'Not reviewed yet',
+          is_unset: true,
+        }) : null}
+        loading={healthSaving}
+      />
     </div>
   );
 }

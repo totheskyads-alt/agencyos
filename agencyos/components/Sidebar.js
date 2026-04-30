@@ -3,7 +3,7 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { useRole } from '@/lib/useRole';
-import { LayoutDashboard, Timer, Users, FolderOpen, CheckSquare, BarChart3, UsersRound, LogOut, Receipt, Bug, NotebookText, TrendingUp, CalendarDays, X } from 'lucide-react';
+import { LayoutDashboard, Timer, Users, FolderOpen, CheckSquare, BarChart3, UsersRound, LogOut, Receipt, Bug, NotebookText, TrendingUp, CalendarDays, X, HeartPulse } from 'lucide-react';
 
 const ALL_NAV = [
   { href: '/dashboard',          icon: LayoutDashboard, label: 'Dashboard',    permission: null },
@@ -14,6 +14,7 @@ const ALL_NAV = [
   { href: '/dashboard/tasks',    icon: CheckSquare,     label: 'Tasks',        permission: null },
   { href: '/dashboard/calendar', icon: CalendarDays,    label: 'Calendar',     permission: null },
   { href: '/dashboard/notes',    icon: NotebookText,    label: 'Notes',        permission: null },
+  { href: '/dashboard/client-health', icon: HeartPulse, label: 'Client Health', permission: 'canViewClientHealth' },
   { href: '/dashboard/billing',  icon: Receipt,         label: 'Billing',      permission: 'canViewBilling' },
   { href: '/dashboard/reports',  icon: BarChart3,       label: 'Reports',      permission: 'canViewReports' },
   { href: '/dashboard/team',     icon: UsersRound,      label: 'Team',         permission: 'canManageTeam' },
