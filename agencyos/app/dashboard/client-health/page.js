@@ -339,54 +339,28 @@ export default function ClientHealthPage() {
         ))}
       </div>
 
-      <div className="grid lg:grid-cols-[1.15fr,0.85fr] gap-4">
-        <div className={`card p-5 border ${getActionTone(filter)}`}>
-          <div className="flex items-start justify-between gap-4">
-            <div className="min-w-0">
-              <p className="text-caption1 uppercase tracking-wide font-semibold text-ios-secondary">What to do now</p>
-              <p className="text-title3 font-bold text-ios-primary mt-1">{actionSummary.title}</p>
-              <p className="text-subhead text-ios-secondary mt-2 max-w-2xl">{actionSummary.body}</p>
-            </div>
-            <div className="shrink-0 rounded-[20px] bg-white/90 border border-ios-separator/40 w-14 h-14 flex items-center justify-center text-2xl shadow-ios-sm">
-              {filter === 'needs_attention' ? '🚨' : filter === 'fragile' ? '🫨' : filter === 'great' ? '🌟' : filter === 'stable' ? '🤝' : '🧭'}
-            </div>
+      <div className={`card p-5 border ${getActionTone(filter)}`}>
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0">
+            <p className="text-caption1 uppercase tracking-wide font-semibold text-ios-secondary">What to do now</p>
+            <p className="text-title3 font-bold text-ios-primary mt-1">{actionSummary.title}</p>
+            <p className="text-subhead text-ios-secondary mt-2 max-w-2xl">{actionSummary.body}</p>
           </div>
-          <div className="grid sm:grid-cols-2 gap-3 mt-4">
-            <div className="rounded-ios-xl bg-white/85 border border-ios-separator/40 px-4 py-3">
-              <p className="text-caption1 uppercase tracking-wide font-semibold text-ios-secondary">Visible first</p>
-              <p className="text-subhead font-semibold text-ios-primary mt-1">{featuredItems.length} relationship{featuredItems.length === 1 ? '' : 's'}</p>
-              <p className="text-footnote text-ios-secondary mt-1">
-                {filter === 'great' ? 'Your strongest accounts are now pinned first.' : 'The most important accounts for this view are now pinned first.'}
-              </p>
-            </div>
-            <div className="rounded-ios-xl bg-white/85 border border-ios-separator/40 px-4 py-3">
-              <p className="text-caption1 uppercase tracking-wide font-semibold text-ios-secondary">Suggested focus</p>
-              <p className="text-footnote font-semibold text-ios-primary mt-1">{suggestedFocus}</p>
-            </div>
+          <div className="shrink-0 rounded-[20px] bg-white/90 border border-ios-separator/40 w-14 h-14 flex items-center justify-center text-2xl shadow-ios-sm">
+            {filter === 'needs_attention' ? '🚨' : filter === 'fragile' ? '🫨' : filter === 'great' ? '🌟' : filter === 'stable' ? '🤝' : '🧭'}
           </div>
         </div>
-
-        <div className="card p-4">
-          <p className="text-headline font-semibold text-ios-primary">Quick signals</p>
-          <div className="space-y-3 mt-4">
-            {overviewInsights.length === 0 ? (
-              <div className="rounded-ios-xl bg-ios-fill/60 px-4 py-8 text-center text-ios-secondary text-footnote">
-                Add a few health entries and the patterns will start to show up here.
-              </div>
-            ) : overviewInsights.slice(0, 3).map((item, index) => {
-              const Icon = item.icon;
-              return (
-                <div key={`${item.title}-${index}`} className="rounded-ios-xl border border-ios-separator/40 bg-white px-4 py-3">
-                  <div className="flex items-center gap-2 mb-1">
-                    <div className="w-8 h-8 rounded-ios bg-ios-fill flex items-center justify-center">
-                      <Icon className="w-4 h-4 text-ios-blue" />
-                    </div>
-                    <p className="text-subhead font-semibold text-ios-primary">{item.title}</p>
-                  </div>
-                  <p className="text-footnote text-ios-secondary leading-6">{item.body}</p>
-                </div>
-              );
-            })}
+        <div className="grid sm:grid-cols-2 gap-3 mt-4">
+          <div className="rounded-ios-xl bg-white/85 border border-ios-separator/40 px-4 py-3">
+            <p className="text-caption1 uppercase tracking-wide font-semibold text-ios-secondary">Visible first</p>
+            <p className="text-subhead font-semibold text-ios-primary mt-1">{featuredItems.length} relationship{featuredItems.length === 1 ? '' : 's'}</p>
+            <p className="text-footnote text-ios-secondary mt-1">
+              {filter === 'great' ? 'Your strongest accounts are now pinned first.' : 'The most important accounts for this view are now pinned first.'}
+            </p>
+          </div>
+          <div className="rounded-ios-xl bg-white/85 border border-ios-separator/40 px-4 py-3">
+            <p className="text-caption1 uppercase tracking-wide font-semibold text-ios-secondary">Suggested focus</p>
+            <p className="text-footnote font-semibold text-ios-primary mt-1">{suggestedFocus}</p>
           </div>
         </div>
       </div>
